@@ -13,22 +13,53 @@ from pathlib import Path
 class ValueBetFinder:
     """Find value bets by comparing model probabilities to odds"""
 
-    def __init__(self, min_edge: float = 0.05, min_odds: float = 1.5, max_odds: float = 10.0):
+    def __init__(self, min_edge: float = 0.05, min_odds: float = 1.5, max_odds: float = 10.0,
+                 normalize_1x2: bool = True):
         """
         Args:
             min_edge: Minimum edge (model_prob - implied_prob) to consider a value bet
             min_odds: Minimum odds to consider (avoid very low odds)
             max_odds: Maximum odds to consider (avoid very high variance)
+            normalize_1x2: Whether to normalize 1X2 implied probabilities to remove overround
         """
         self.min_edge = min_edge
         self.min_odds = min_odds
         self.max_odds = max_odds
+        self.normalize_1x2 = normalize_1x2
 
     def odds_to_prob(self, odds: float) -> float:
-        """Convert decimal odds to implied probability"""
-        if odds <= 0:
+        """Convert decimal odds to raw implied probability (includes margin)"""
+        if odds is None or odds <= 0:
             return 0
         return 1 / odds
+
+    def normalize_1x2_probs(self, odds_home: float, odds_draw: float, odds_away: float) -> tuple:
+        """
+        Normalize 1X2 implied probabilities to remove bookmaker overround.
+
+        Raw implied probs sum to > 1.0 due to bookmaker margin.
+        This normalizes them to sum to 1.0 for fair comparison with model probs.
+
+        Returns:
+            Tuple of (normalized_home_prob, normalized_draw_prob, normalized_away_prob)
+        """
+        raw_home = self.odds_to_prob(odds_home)
+        raw_draw = self.odds_to_prob(odds_draw)
+        raw_away = self.odds_to_prob(odds_away)
+
+        total = raw_home + raw_draw + raw_away
+
+        if total <= 0:
+            return (0, 0, 0)
+
+        return (raw_home / total, raw_draw / total, raw_away / total)
+
+    def get_overround(self, odds_home: float, odds_draw: float, odds_away: float) -> float:
+        """Calculate bookmaker overround (margin) for 1X2 market"""
+        raw_home = self.odds_to_prob(odds_home)
+        raw_draw = self.odds_to_prob(odds_draw)
+        raw_away = self.odds_to_prob(odds_away)
+        return raw_home + raw_draw + raw_away - 1.0
 
     def prob_to_odds(self, prob: float) -> float:
         """Convert probability to fair odds"""
@@ -36,9 +67,8 @@ class ValueBetFinder:
             return 0
         return 1 / prob
 
-    def calculate_edge(self, model_prob: float, odds: float) -> float:
+    def calculate_edge(self, model_prob: float, implied_prob: float) -> float:
         """Calculate edge: model probability - implied probability"""
-        implied_prob = self.odds_to_prob(odds)
         return model_prob - implied_prob
 
     def kelly_fraction(self, model_prob: float, odds: float, fraction: float = 0.25) -> float:
@@ -91,16 +121,31 @@ class ValueBetFinder:
                 "game_week": row["game_week"],
             }
 
-            # Check each market
+            # Normalize 1X2 implied probabilities to remove overround
+            if self.normalize_1x2:
+                norm_home, norm_draw, norm_away = self.normalize_1x2_probs(
+                    row["odds_home"], row["odds_draw"], row["odds_away"]
+                )
+            else:
+                norm_home = self.odds_to_prob(row["odds_home"])
+                norm_draw = self.odds_to_prob(row["odds_draw"])
+                norm_away = self.odds_to_prob(row["odds_away"])
+
+            # For binary markets (Over 2.5, BTTS), use raw implied prob
+            # (ideally we'd normalize these too if we had both sides)
+            implied_over25 = self.odds_to_prob(row["odds_over_25"])
+            implied_btts = self.odds_to_prob(row["odds_btts_yes"])
+
+            # Check each market with appropriate implied probability
             markets = [
-                ("Home", row["prob_H"], row["odds_home"], row["target_result"] == "H"),
-                ("Draw", row["prob_D"], row["odds_draw"], row["target_result"] == "D"),
-                ("Away", row["prob_A"], row["odds_away"], row["target_result"] == "A"),
-                ("Over 2.5", row["prob_over25"], row["odds_over_25"], row["target_over_25"] == 1),
-                ("BTTS", row["prob_btts"], row["odds_btts_yes"], row["target_btts"] == 1),
+                ("Home", row["prob_H"], row["odds_home"], norm_home, row["target_result"] == "H"),
+                ("Draw", row["prob_D"], row["odds_draw"], norm_draw, row["target_result"] == "D"),
+                ("Away", row["prob_A"], row["odds_away"], norm_away, row["target_result"] == "A"),
+                ("Over 2.5", row["prob_over25"], row["odds_over_25"], implied_over25, row["target_over_25"] == 1),
+                ("BTTS", row["prob_btts"], row["odds_btts_yes"], implied_btts, row["target_btts"] == 1),
             ]
 
-            for market, model_prob, odds, actual_win in markets:
+            for market, model_prob, odds, implied_prob, actual_win in markets:
                 if odds is None or odds <= 0:
                     continue
 
@@ -108,7 +153,7 @@ class ValueBetFinder:
                 if odds < self.min_odds or odds > self.max_odds:
                     continue
 
-                edge = self.calculate_edge(model_prob, odds)
+                edge = self.calculate_edge(model_prob, implied_prob)
 
                 if edge >= self.min_edge:
                     kelly = self.kelly_fraction(model_prob, odds)
@@ -118,7 +163,8 @@ class ValueBetFinder:
                         "market": market,
                         "model_prob": model_prob,
                         "odds": odds,
-                        "implied_prob": self.odds_to_prob(odds),
+                        "implied_prob": implied_prob,
+                        "raw_implied_prob": self.odds_to_prob(odds),
                         "edge": edge,
                         "kelly_fraction": kelly,
                         "actual_win": actual_win,

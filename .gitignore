@@ -28,9 +28,13 @@ data/predictions/*
 !data/processed/.gitkeep
 !data/predictions/.gitkeep
 
-# Models
+# Models (keep structure, ignore model files)
 models/*.pkl
 models/*.joblib
+
+# Training reports (generated per run)
+reports/
+!reports/.gitkeep
 
 # Jupyter
 .ipynb_checkpoints/

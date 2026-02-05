@@ -20,7 +20,11 @@ betbot/
 │       ├── betbot.db      # SQLite database med kampdata
 │       └── features.csv   # Genererte features
 ├── models/
-│   └── match_predictor.pkl # Trent XGBoost-modell
+│   ├── match_predictor.pkl           # Trent XGBoost-modell (current)
+│   └── match_predictor_YYYYMMDD_*.pkl # Versjonerte modeller
+├── reports/
+│   ├── latest_training_report.json   # Siste treningsrapport
+│   └── training_report_*.json        # Historiske rapporter
 ├── src/
 │   ├── data/
 │   │   ├── footystats_client.py    # FootyStats API-klient
@@ -67,9 +71,11 @@ source .venv/bin/activate
 python scripts/download_all_leagues.py
 ```
 
-### Kjør backtest
+### Kjør backtest (out-of-sample)
 ```bash
-python scripts/run_backtest.py
+python scripts/run_backtest.py                    # Default: hold-out siste sesong
+python scripts/run_backtest.py --holdout-seasons 2 # Hold ut 2 sesonger
+python scripts/run_backtest.py --in-sample         # In-sample (kun for referanse)
 ```
 
 ### Se dagens odds
@@ -88,7 +94,6 @@ python scripts/train_model.py
 
 1. **FootyStats cache**: Etter å velge ligaer må man vente 30 min før data er tilgjengelig.
 2. **Norsk Tipping**: Bruker Tipping-kuponger (sannsynligheter), ikke faktiske bookmakerodds.
-3. **Backtest er in-sample**: Trenger tidsbasert split for realistiske resultater.
 
 ## Viktig ved endringer
 

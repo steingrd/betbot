@@ -86,9 +86,15 @@ class MatchPredictor:
         return X, targets
 
     def train(self, df: pd.DataFrame, test_size: float = 0.2) -> dict:
-        """Train all models"""
+        """Train all models using time-based split to avoid data leakage"""
 
         print("Preparing data...")
+
+        # Sort by date for time-based split (critical for avoiding data leakage)
+        if "date_unix" in df.columns:
+            df = df.sort_values("date_unix").reset_index(drop=True)
+            print(f"  Sorted {len(df)} matches by date for time-based split")
+
         X, targets = self.prepare_data(df)
 
         # Encode result labels
@@ -96,16 +102,16 @@ class MatchPredictor:
         y_over25 = targets["over25"]
         y_btts = targets["btts"]
 
-        # Split data (time-based would be better, but using random for now)
-        X_train, X_test, y_res_train, y_res_test = train_test_split(
-            X, y_result, test_size=test_size, random_state=42
-        )
-        _, _, y_o25_train, y_o25_test = train_test_split(
-            X, y_over25, test_size=test_size, random_state=42
-        )
-        _, _, y_btts_train, y_btts_test = train_test_split(
-            X, y_btts, test_size=test_size, random_state=42
-        )
+        # Time-based split: train on earlier matches, test on later matches
+        # This prevents future data from leaking into training
+        split_idx = int(len(X) * (1 - test_size))
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_res_train, y_res_test = y_result[:split_idx], y_result[split_idx:]
+        y_o25_train, y_o25_test = y_over25[:split_idx], y_over25[split_idx:]
+        y_btts_train, y_btts_test = y_btts[:split_idx], y_btts[split_idx:]
+
+        print(f"  Train set: {len(X_train)} matches (earlier)")
+        print(f"  Test set: {len(X_test)} matches (later)")
 
         # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
