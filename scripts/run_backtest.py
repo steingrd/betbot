@@ -200,11 +200,27 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
         match_count = league_seasons["match_count"].sum()
         print(f"  {league_name}: {len(league_seasons)} seasons ({', '.join(season_labels)}) - {match_count} matches")
 
-    # Generate features
-    print(f"\nGenerating features...")
-    engineer = FeatureEngineer(matches)
-    features = engineer.generate_features()
-    print(f"Generated features for {len(features)} matches")
+    # Load or generate features (with caching)
+    features_cache = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
+
+    if features_cache.exists():
+        print(f"\nLoading cached features from {features_cache.name}...")
+        features = pd.read_csv(features_cache)
+        print(f"Loaded {len(features)} cached features")
+
+        # Check if cache has required columns
+        if "season_id" not in features.columns or "league_id" not in features.columns:
+            print("Cache missing season_id/league_id - regenerating...")
+            engineer = FeatureEngineer(matches)
+            features = engineer.generate_features()
+            features.to_csv(features_cache, index=False)
+            print(f"Generated and cached {len(features)} features")
+    else:
+        print(f"\nGenerating features (this takes a while first time)...")
+        engineer = FeatureEngineer(matches)
+        features = engineer.generate_features()
+        features.to_csv(features_cache, index=False)
+        print(f"Generated and cached {len(features)} features to {features_cache.name}")
 
     # Split train/test per league
     print(f"\nSplitting data (holding out {holdout_seasons} season(s) per league)...")
@@ -341,7 +357,15 @@ def main():
                         help="Run in-sample backtest (not recommended)")
     parser.add_argument("--holdout-seasons", type=int, default=1,
                         help="Number of seasons per league to hold out for testing (default: 1)")
+    parser.add_argument("--regenerate", action="store_true",
+                        help="Force regeneration of features (ignore cache)")
     args = parser.parse_args()
+
+    if args.regenerate:
+        cache_path = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
+        if cache_path.exists():
+            cache_path.unlink()
+            print(f"Deleted feature cache: {cache_path}")
 
     if args.in_sample:
         run_in_sample_backtest()
