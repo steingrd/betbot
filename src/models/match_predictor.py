@@ -86,14 +86,21 @@ class MatchPredictor:
         return X, targets
 
     def train(self, df: pd.DataFrame, test_size: float = 0.2) -> dict:
-        """Train all models using time-based split to avoid data leakage"""
+        """
+        Train all models using time-based split to avoid data leakage.
+
+        Args:
+            df: DataFrame with features and targets
+            test_size: Fraction of data to use for validation (0.0 to use all data for training,
+                       useful when you have a separate hold-out test set)
+        """
 
         print("Preparing data...")
 
         # Sort by date for time-based split (critical for avoiding data leakage)
         if "date_unix" in df.columns:
             df = df.sort_values("date_unix").reset_index(drop=True)
-            print(f"  Sorted {len(df)} matches by date for time-based split")
+            print(f"  Sorted {len(df)} matches by date")
 
         X, targets = self.prepare_data(df)
 
@@ -102,20 +109,29 @@ class MatchPredictor:
         y_over25 = targets["over25"]
         y_btts = targets["btts"]
 
-        # Time-based split: train on earlier matches, test on later matches
-        # This prevents future data from leaking into training
-        split_idx = int(len(X) * (1 - test_size))
-        X_train, X_test = X[:split_idx], X[split_idx:]
-        y_res_train, y_res_test = y_result[:split_idx], y_result[split_idx:]
-        y_o25_train, y_o25_test = y_over25[:split_idx], y_over25[split_idx:]
-        y_btts_train, y_btts_test = y_btts[:split_idx], y_btts[split_idx:]
-
-        print(f"  Train set: {len(X_train)} matches (earlier)")
-        print(f"  Test set: {len(X_test)} matches (later)")
+        # Time-based split (or use all data if test_size=0)
+        if test_size > 0:
+            split_idx = int(len(X) * (1 - test_size))
+            X_train, X_test = X[:split_idx], X[split_idx:]
+            y_res_train, y_res_test = y_result[:split_idx], y_result[split_idx:]
+            y_o25_train, y_o25_test = y_over25[:split_idx], y_over25[split_idx:]
+            y_btts_train, y_btts_test = y_btts[:split_idx], y_btts[split_idx:]
+            print(f"  Train set: {len(X_train)} matches (earlier)")
+            print(f"  Test set: {len(X_test)} matches (later)")
+            has_test_set = True
+        else:
+            # Use all data for training (when external hold-out set exists)
+            X_train = X
+            y_res_train = y_result
+            y_o25_train = y_over25
+            y_btts_train = y_btts
+            print(f"  Using all {len(X_train)} matches for training (external hold-out assumed)")
+            has_test_set = False
 
         # Scale features
         X_train_scaled = self.scaler.fit_transform(X_train)
-        X_test_scaled = self.scaler.transform(X_test)
+        if has_test_set:
+            X_test_scaled = self.scaler.transform(X_test)
 
         results = {}
 
@@ -133,16 +149,24 @@ class MatchPredictor:
         )
         self.result_model.fit(X_train_scaled, y_res_train)
 
-        y_pred = self.result_model.predict(X_test_scaled)
-        y_proba = self.result_model.predict_proba(X_test_scaled)
-
-        results["result"] = {
-            "accuracy": accuracy_score(y_res_test, y_pred),
-            "log_loss": log_loss(y_res_test, y_proba),
-            "classes": self.label_encoder.classes_.tolist()
-        }
-        print(f"  Accuracy: {results['result']['accuracy']:.3f}")
-        print(f"  Log Loss: {results['result']['log_loss']:.3f}")
+        if has_test_set:
+            y_pred = self.result_model.predict(X_test_scaled)
+            y_proba = self.result_model.predict_proba(X_test_scaled)
+            results["result"] = {
+                "accuracy": accuracy_score(y_res_test, y_pred),
+                "log_loss": log_loss(y_res_test, y_proba),
+                "classes": self.label_encoder.classes_.tolist()
+            }
+            print(f"  Accuracy: {results['result']['accuracy']:.3f}")
+            print(f"  Log Loss: {results['result']['log_loss']:.3f}")
+        else:
+            results["result"] = {
+                "accuracy": None,
+                "log_loss": None,
+                "classes": self.label_encoder.classes_.tolist(),
+                "note": "No internal test set (external hold-out used)"
+            }
+            print("  (No internal validation - using external hold-out)")
 
         # === Over 2.5 Model ===
         print("\nTraining Over 2.5 Goals Model...")
@@ -158,15 +182,21 @@ class MatchPredictor:
         )
         self.over25_model.fit(X_train_scaled, y_o25_train)
 
-        y_pred = self.over25_model.predict(X_test_scaled)
-        y_proba = self.over25_model.predict_proba(X_test_scaled)[:, 1]
-
-        results["over25"] = {
-            "accuracy": accuracy_score(y_o25_test, y_pred),
-            "log_loss": log_loss(y_o25_test, self.over25_model.predict_proba(X_test_scaled)),
-        }
-        print(f"  Accuracy: {results['over25']['accuracy']:.3f}")
-        print(f"  Log Loss: {results['over25']['log_loss']:.3f}")
+        if has_test_set:
+            y_pred = self.over25_model.predict(X_test_scaled)
+            results["over25"] = {
+                "accuracy": accuracy_score(y_o25_test, y_pred),
+                "log_loss": log_loss(y_o25_test, self.over25_model.predict_proba(X_test_scaled)),
+            }
+            print(f"  Accuracy: {results['over25']['accuracy']:.3f}")
+            print(f"  Log Loss: {results['over25']['log_loss']:.3f}")
+        else:
+            results["over25"] = {
+                "accuracy": None,
+                "log_loss": None,
+                "note": "No internal test set (external hold-out used)"
+            }
+            print("  (No internal validation - using external hold-out)")
 
         # === BTTS Model ===
         print("\nTraining BTTS Model...")
@@ -182,15 +212,21 @@ class MatchPredictor:
         )
         self.btts_model.fit(X_train_scaled, y_btts_train)
 
-        y_pred = self.btts_model.predict(X_test_scaled)
-        y_proba = self.btts_model.predict_proba(X_test_scaled)[:, 1]
-
-        results["btts"] = {
-            "accuracy": accuracy_score(y_btts_test, y_pred),
-            "log_loss": log_loss(y_btts_test, self.btts_model.predict_proba(X_test_scaled)),
-        }
-        print(f"  Accuracy: {results['btts']['accuracy']:.3f}")
-        print(f"  Log Loss: {results['btts']['log_loss']:.3f}")
+        if has_test_set:
+            y_pred = self.btts_model.predict(X_test_scaled)
+            results["btts"] = {
+                "accuracy": accuracy_score(y_btts_test, y_pred),
+                "log_loss": log_loss(y_btts_test, self.btts_model.predict_proba(X_test_scaled)),
+            }
+            print(f"  Accuracy: {results['btts']['accuracy']:.3f}")
+            print(f"  Log Loss: {results['btts']['log_loss']:.3f}")
+        else:
+            results["btts"] = {
+                "accuracy": None,
+                "log_loss": None,
+                "note": "No internal test set (external hold-out used)"
+            }
+            print("  (No internal validation - using external hold-out)")
 
         self.is_fitted = True
         return results

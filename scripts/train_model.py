@@ -12,8 +12,11 @@ Generates features and trains models with:
 import sys
 import time
 import json
+import random
 from pathlib import Path
 from datetime import datetime
+
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -21,12 +24,15 @@ from data.data_processor import DataProcessor
 from features.feature_engineering import FeatureEngineer
 from models.match_predictor import MatchPredictor
 
-# Reproducibility seeds (documented here for reference)
-RANDOM_SEEDS = {
-    "xgboost": 42,
-    "train_test_split": 42,  # Now using time-based split, but kept for reference
-    "calibration_cv": 3,     # CV folds for calibration
-}
+# Reproducibility seeds
+RANDOM_SEED = 42
+
+
+def set_seeds(seed: int = RANDOM_SEED):
+    """Set all random seeds for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    # Note: XGBoost uses random_state parameter directly in model init
 
 
 def format_duration(seconds):
@@ -79,20 +85,21 @@ def main():
     start_time = time.time()
     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+    # Set seeds for reproducibility
+    set_seeds(RANDOM_SEED)
+
     print("=" * 60)
     print("BETBOT - MODEL TRAINING")
     print("=" * 60)
     print(f"Started: {timestamp}")
     print()
-    print("Reproducibility settings:")
-    for key, value in RANDOM_SEEDS.items():
-        print(f"  {key}: {value}")
+    print(f"Random seed: {RANDOM_SEED} (set for random, numpy, xgboost)")
     print()
 
     # Initialize report
     report = {
         "timestamp": timestamp,
-        "random_seeds": RANDOM_SEEDS,
+        "random_seed": RANDOM_SEED,
         "steps": {},
         "model_performance": {},
         "data_stats": {},
@@ -218,9 +225,12 @@ def main():
     print(f"  Features generated: {len(features_df):,}")
     print()
     print("  Model performance (time-based out-of-sample):")
-    print(f"    1X2 Result:  {results['result']['accuracy']:.1%} accuracy, {results['result']['log_loss']:.3f} log loss")
-    print(f"    Over 2.5:    {results['over25']['accuracy']:.1%} accuracy, {results['over25']['log_loss']:.3f} log loss")
-    print(f"    BTTS:        {results['btts']['accuracy']:.1%} accuracy, {results['btts']['log_loss']:.3f} log loss")
+    if results['result']['accuracy'] is not None:
+        print(f"    1X2 Result:  {results['result']['accuracy']:.1%} accuracy, {results['result']['log_loss']:.3f} log loss")
+        print(f"    Over 2.5:    {results['over25']['accuracy']:.1%} accuracy, {results['over25']['log_loss']:.3f} log loss")
+        print(f"    BTTS:        {results['btts']['accuracy']:.1%} accuracy, {results['btts']['log_loss']:.3f} log loss")
+    else:
+        print("    (No internal validation - evaluate on external hold-out set)")
     print()
     print(f"  Model version: {model_version}")
     print(f"  Model location: {predictor.model_dir}")

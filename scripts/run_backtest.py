@@ -19,6 +19,29 @@ from models.match_predictor import MatchPredictor
 from analysis.value_finder import ValueBetFinder
 
 
+def get_season_year(date, season_start_month: int = 8):
+    """
+    Determine season year from date.
+
+    Args:
+        date: datetime object
+        season_start_month: Month when season starts (default 8 = August)
+            - Use 8 for European leagues (Aug-May)
+            - Use 1 for calendar-year leagues (MLS, etc.)
+
+    Returns:
+        Season year (year when season started)
+    """
+    if date.month >= season_start_month:
+        return date.year
+    return date.year - 1
+
+
+# Season start month (8 = August for European leagues)
+# Change to 1 for calendar-year leagues like MLS
+SEASON_START_MONTH = 8
+
+
 def get_season_info(features: pd.DataFrame) -> pd.DataFrame:
     """Get info about available seasons"""
     if "date_unix" not in features.columns:
@@ -29,9 +52,9 @@ def get_season_info(features: pd.DataFrame) -> pd.DataFrame:
     features["year"] = features["date"].dt.year
     features["month"] = features["date"].dt.month
 
-    # Determine season (Aug-May = same season, with year of August)
-    features["season_year"] = features.apply(
-        lambda r: r["year"] if r["month"] >= 8 else r["year"] - 1, axis=1
+    # Determine season based on configured start month
+    features["season_year"] = features["date"].apply(
+        lambda d: get_season_year(d, SEASON_START_MONTH)
     )
 
     season_stats = features.groupby("season_year").agg(
@@ -74,7 +97,7 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
     # Determine train/test split by season
     features["date"] = pd.to_datetime(features["date_unix"], unit="s")
     features["season_year"] = features["date"].apply(
-        lambda d: d.year if d.month >= 8 else d.year - 1
+        lambda d: get_season_year(d, SEASON_START_MONTH)
     )
 
     all_seasons = sorted(features["season_year"].unique())
@@ -101,8 +124,8 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
     print("=" * 60)
 
     predictor = MatchPredictor()
-    # Train with 0 test_size since we have our own hold-out
-    results = predictor.train(train_features, test_size=0.1)  # Small validation set within train
+    # Use all training data since we have external hold-out season(s)
+    results = predictor.train(train_features, test_size=0.0)
 
     # Make predictions on hold-out test set
     print("\n" + "=" * 60)

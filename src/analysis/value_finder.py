@@ -71,21 +71,31 @@ class ValueBetFinder:
         """Calculate edge: model probability - implied probability"""
         return model_prob - implied_prob
 
-    def kelly_fraction(self, model_prob: float, odds: float, fraction: float = 0.25) -> float:
+    def kelly_fraction(self, model_prob: float, odds: float, implied_prob: float = None,
+                        fraction: float = 0.25) -> float:
         """
         Calculate Kelly criterion stake as fraction of bankroll.
         Uses fractional Kelly (default 25%) for reduced variance.
 
+        Args:
+            model_prob: Our model's probability estimate
+            odds: The actual decimal odds we get paid
+            implied_prob: The implied probability to use for edge calculation.
+                          If None, uses raw 1/odds. Pass normalized prob for consistency.
+            fraction: Kelly fraction (default 25% for reduced variance)
+
         Returns fraction of bankroll to stake (0 if no edge)
         """
-        implied_prob = self.odds_to_prob(odds)
+        if implied_prob is None:
+            implied_prob = self.odds_to_prob(odds)
+
         edge = model_prob - implied_prob
 
         if edge <= 0:
             return 0
 
         # Full Kelly: (p * odds - 1) / (odds - 1)
-        # where p = model_prob, odds = decimal odds
+        # where p = model_prob, odds = decimal odds (actual payout)
         full_kelly = (model_prob * odds - 1) / (odds - 1)
 
         # Apply fractional Kelly
@@ -156,7 +166,8 @@ class ValueBetFinder:
                 edge = self.calculate_edge(model_prob, implied_prob)
 
                 if edge >= self.min_edge:
-                    kelly = self.kelly_fraction(model_prob, odds)
+                    # Pass implied_prob for consistent edge calculation in Kelly
+                    kelly = self.kelly_fraction(model_prob, odds, implied_prob=implied_prob)
 
                     value_bets.append({
                         **match_info,
