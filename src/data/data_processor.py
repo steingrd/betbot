@@ -340,10 +340,11 @@ class DataProcessor:
         """Update season start/end dates from match data"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        # Ensure int conversion for pandas int64 compatibility
         cursor.execute("""
             UPDATE seasons SET start_date = ?, end_date = ?
             WHERE id = ?
-        """, (start_date, end_date, season_id))
+        """, (int(start_date), int(end_date), int(season_id)))
         conn.commit()
         conn.close()
 
