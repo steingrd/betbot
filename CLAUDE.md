@@ -35,7 +35,9 @@ betbot/
 └── scripts/
     ├── test_api.py                 # Test FootyStats API
     ├── download_all_leagues.py     # Last ned alle valgte ligaer
+    ├── train_model.py              # Tren modeller med progress
     ├── run_backtest.py             # Kjør backtest
+    ├── daily_picks.py              # Finn value bets
     └── get_todays_odds.py          # Hent odds fra Norsk Tipping
 ```
 
@@ -79,7 +81,7 @@ python scripts/get_todays_odds.py --detailed
 
 ### Tren modell på nytt
 ```bash
-python src/models/match_predictor.py
+python scripts/train_model.py
 ```
 
 ## Kjente problemer

@@ -30,8 +30,7 @@ def format_duration(seconds):
 
 
 class ProgressTracker:
-    def __init__(self, step_name):
-        self.step_name = step_name
+    def __init__(self):
         self.start_time = time.time()
         self.last_percent = -1
 
@@ -72,7 +71,7 @@ def main():
     print()
 
     engineer = FeatureEngineer(matches)
-    progress = ProgressTracker("Features")
+    progress = ProgressTracker()
 
     features_df = engineer.generate_features(min_matches=3, progress_callback=progress.update)
 
@@ -88,20 +87,14 @@ def main():
 
     # Step 3: Train models
     step_start = time.time()
-    print("[3/4] Training ML models...")
+    print("[3/4] Training ML models (1X2, Over 2.5, BTTS)...")
+    print()
 
     predictor = MatchPredictor()
-
-    print("       Training 1X2 result model...")
-    predictor.train_result_model(features_df)
-
-    print("       Training Over 2.5 goals model...")
-    predictor.train_over25_model(features_df)
-
-    print("       Training BTTS model...")
-    predictor.train_btts_model(features_df)
+    results = predictor.train(features_df)
 
     elapsed = time.time() - step_start
+    print()
     print(f"       All models trained ({format_duration(elapsed)})")
     print()
 
@@ -109,7 +102,7 @@ def main():
     step_start = time.time()
     print("[4/4] Saving models...")
 
-    predictor.save_models()
+    predictor.save()
 
     elapsed = time.time() - step_start
     print(f"       Models saved ({format_duration(elapsed)})")
@@ -123,7 +116,12 @@ def main():
     print(f"  Total time: {format_duration(total_elapsed)}")
     print(f"  Matches processed: {len(matches):,}")
     print(f"  Features generated: {len(features_df):,}")
-    print(f"  Models trained: 3 (1X2, Over 2.5, BTTS)")
+    print()
+    print("  Model performance:")
+    print(f"    1X2 Result:  {results['result']['accuracy']:.1%} accuracy")
+    print(f"    Over 2.5:    {results['over25']['accuracy']:.1%} accuracy")
+    print(f"    BTTS:        {results['btts']['accuracy']:.1%} accuracy")
+    print()
     print(f"  Model location: {predictor.model_dir}")
     print()
     print(f"Finished: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
