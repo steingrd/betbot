@@ -12,10 +12,17 @@ Run this after upgrading to the new schema if you have existing data.
 """
 
 import sys
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+
+def stable_league_id(country: str, league_name: str) -> int:
+    """Generate a stable league ID from country and league name using MD5."""
+    key = f"{country}|{league_name}".encode('utf-8')
+    return int(hashlib.md5(key).hexdigest()[:8], 16)
 
 from data.footystats_client import FootyStatsClient
 from data.data_processor import DataProcessor
@@ -68,10 +75,10 @@ def main():
         country = league.get("country", "")
         seasons = league.get("season", [])
 
-        # Generate stable league_id from country + name
+        # Generate stable league_id from country + name (MD5-based, consistent across runs)
         league_key = (country, league_name)
         if league_key not in league_id_map:
-            league_id_map[league_key] = hash(league_key) % (10**9)  # Stable hash
+            league_id_map[league_key] = stable_league_id(country, league_name)
         league_id = league_id_map[league_key]
 
         if isinstance(seasons, list):

@@ -36,6 +36,57 @@ from data.data_processor import DataProcessor
 from features.feature_engineering import FeatureEngineer
 from models.match_predictor import MatchPredictor
 from analysis.value_finder import ValueBetFinder
+from sklearn.metrics import brier_score_loss
+from sklearn.calibration import calibration_curve
+import numpy as np
+
+
+# Predefined league filters (must match exact names in database)
+LEAGUE_FILTERS = {
+    "pl": ["England Premier League"],
+    "norway": ["Norway Eliteserien", "Norway First Division"],
+    "pl+norway": ["England Premier League", "Norway Eliteserien", "Norway First Division"],
+    "top5": ["England Premier League", "Spain La Liga", "Italy Serie A", "Germany Bundesliga", "France Ligue 1"],
+}
+
+# Minimum test set size for reliable results
+MIN_TEST_SIZE = 500
+
+
+def bootstrap_roi_ci(value_bets: pd.DataFrame, stake: float = 10.0,
+                      n_iterations: int = 1000, ci: float = 0.95) -> tuple:
+    """
+    Calculate bootstrapped confidence interval for ROI.
+
+    Args:
+        value_bets: DataFrame with value bets (must have 'odds' and 'actual_win' columns)
+        stake: Stake per bet
+        n_iterations: Number of bootstrap iterations
+        ci: Confidence interval (default 95%)
+
+    Returns:
+        (roi_mean, roi_lower, roi_upper)
+    """
+    if len(value_bets) == 0:
+        return (0, 0, 0)
+
+    rois = []
+    n = len(value_bets)
+
+    for _ in range(n_iterations):
+        # Sample with replacement
+        sample = value_bets.sample(n=n, replace=True)
+        total_staked = len(sample) * stake
+        total_returned = sum(stake * row["odds"] if row["actual_win"] else 0
+                            for _, row in sample.iterrows())
+        roi = ((total_returned - total_staked) / total_staked) * 100
+        rois.append(roi)
+
+    rois = sorted(rois)
+    lower_idx = int((1 - ci) / 2 * n_iterations)
+    upper_idx = int((1 + ci) / 2 * n_iterations) - 1
+
+    return (np.mean(rois), rois[lower_idx], rois[upper_idx])
 
 
 def format_season_label(start_date: int, end_date: int) -> str:
@@ -82,18 +133,20 @@ def get_season_info_by_league(processor: DataProcessor) -> pd.DataFrame:
 def split_train_test_per_league(
     features: pd.DataFrame,
     seasons: pd.DataFrame,
-    holdout_seasons: int = 1
+    holdout_seasons: int = 1,
+    completed_only: bool = True
 ) -> tuple:
     """
     Split data into train/test per league.
 
-    For each league, holds out the N most recent seasons (by start_date).
+    For each league, holds out the N most recent COMPLETED seasons (by start_date).
     This handles both calendar-year and Aug-May seasons correctly.
 
     Args:
         features: DataFrame with match features (must have season_id)
         seasons: DataFrame with season metadata (from get_seasons_by_league)
         holdout_seasons: Number of most recent seasons per league to hold out
+        completed_only: If True, only use completed seasons for holdout (end_date < now)
 
     Returns:
         (train_features, test_features, split_info)
@@ -113,9 +166,21 @@ def split_train_test_per_league(
     test_seasons = []
     split_info = []
 
+    # Current time for filtering completed seasons
+    now = int(time.time())
+
     # Process each league separately
     for league_id in features["league_id"].dropna().unique():
         league_seasons = seasons[seasons["league_id"] == league_id].copy()
+
+        # Filter to completed seasons only (for holdout selection)
+        if completed_only:
+            completed_seasons = league_seasons[league_seasons["end_date"] < now]
+            ongoing_seasons = league_seasons[league_seasons["end_date"] >= now]
+            if len(ongoing_seasons) > 0:
+                ongoing_labels = ongoing_seasons["display_label"].tolist()
+                print(f"  Note: Excluding {len(ongoing_seasons)} ongoing season(s) from holdout: {ongoing_labels}")
+            league_seasons = completed_seasons
 
         if len(league_seasons) < 2:
             league_name = league_seasons["league_name"].iloc[0] if len(league_seasons) > 0 else f"League {league_id}"
@@ -187,13 +252,120 @@ def verify_no_leakage(train_features: pd.DataFrame, test_features: pd.DataFrame)
 CUP_KEYWORDS = ['Cup', 'Pokal', 'Copa', 'Coppa', 'Coupe', 'Super Cup']
 
 
-def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = False):
+def print_calibration_report(predictions: pd.DataFrame, test_features: pd.DataFrame):
+    """
+    Print calibration diagnostics for model predictions.
+
+    Shows:
+    - Probability distribution stats (mean, min, max, std)
+    - Brier scores per market
+    - Reliability diagram data (binned accuracy vs predicted probability)
+    """
+    print("\n" + "=" * 60)
+    print("CALIBRATION REPORT")
+    print("=" * 60)
+
+    # Merge predictions with actual results
+    merged = predictions.merge(
+        test_features[["match_id", "target_result", "target_over_25", "target_btts"]],
+        on="match_id"
+    )
+
+    # === 1X2 Result Calibration ===
+    print("\n1X2 RESULT MODEL:")
+    print("-" * 40)
+
+    for outcome in ["H", "D", "A"]:
+        prob_col = f"prob_{outcome}"
+        if prob_col not in merged.columns:
+            continue
+
+        probs = merged[prob_col].values
+        actuals = (merged["target_result"] == outcome).astype(int).values
+
+        # Stats
+        print(f"\n  {outcome}:")
+        print(f"    Predicted prob: mean={probs.mean():.1%}, min={probs.min():.1%}, "
+              f"max={probs.max():.1%}, std={probs.std():.1%}")
+        print(f"    Actual rate:    {actuals.mean():.1%}")
+
+        # Brier score (lower is better, 0 = perfect)
+        brier = brier_score_loss(actuals, probs)
+        print(f"    Brier score:    {brier:.4f}")
+
+        # Reliability bins (calibration curve)
+        try:
+            fraction_of_positives, mean_predicted_value = calibration_curve(
+                actuals, probs, n_bins=5, strategy='uniform'
+            )
+            print(f"    Reliability bins (predicted → actual):")
+            for pred, actual in zip(mean_predicted_value, fraction_of_positives):
+                diff = actual - pred
+                arrow = "↑" if diff > 0.02 else "↓" if diff < -0.02 else "≈"
+                print(f"      {pred:.1%} → {actual:.1%} ({arrow} {diff:+.1%})")
+        except ValueError:
+            print(f"    (Not enough variance for calibration curve)")
+
+    # === Over 2.5 Goals Calibration ===
+    print("\nOVER 2.5 GOALS MODEL:")
+    print("-" * 40)
+
+    probs = merged["prob_over25"].values
+    actuals = merged["target_over_25"].astype(int).values
+
+    print(f"  Predicted prob: mean={probs.mean():.1%}, min={probs.min():.1%}, "
+          f"max={probs.max():.1%}, std={probs.std():.1%}")
+    print(f"  Actual rate:    {actuals.mean():.1%}")
+    brier = brier_score_loss(actuals, probs)
+    print(f"  Brier score:    {brier:.4f}")
+
+    try:
+        fraction_of_positives, mean_predicted_value = calibration_curve(
+            actuals, probs, n_bins=5, strategy='uniform'
+        )
+        print(f"  Reliability bins (predicted → actual):")
+        for pred, actual in zip(mean_predicted_value, fraction_of_positives):
+            diff = actual - pred
+            arrow = "↑" if diff > 0.02 else "↓" if diff < -0.02 else "≈"
+            print(f"    {pred:.1%} → {actual:.1%} ({arrow} {diff:+.1%})")
+    except ValueError:
+        print(f"  (Not enough variance for calibration curve)")
+
+    # === BTTS Calibration ===
+    print("\nBTTS MODEL:")
+    print("-" * 40)
+
+    probs = merged["prob_btts"].values
+    actuals = merged["target_btts"].astype(int).values
+
+    print(f"  Predicted prob: mean={probs.mean():.1%}, min={probs.min():.1%}, "
+          f"max={probs.max():.1%}, std={probs.std():.1%}")
+    print(f"  Actual rate:    {actuals.mean():.1%}")
+    brier = brier_score_loss(actuals, probs)
+    print(f"  Brier score:    {brier:.4f}")
+
+    try:
+        fraction_of_positives, mean_predicted_value = calibration_curve(
+            actuals, probs, n_bins=5, strategy='uniform'
+        )
+        print(f"  Reliability bins (predicted → actual):")
+        for pred, actual in zip(mean_predicted_value, fraction_of_positives):
+            diff = actual - pred
+            arrow = "↑" if diff > 0.02 else "↓" if diff < -0.02 else "≈"
+            print(f"    {pred:.1%} → {actual:.1%} ({arrow} {diff:+.1%})")
+    except ValueError:
+        print(f"  (Not enough variance for calibration curve)")
+
+
+def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = False,
+                                league_filter: list = None):
     """
     Run proper out-of-sample backtest with per-league holdout.
 
     Args:
         holdout_seasons: Number of most recent seasons per league to use as test set
         exclude_cups: Exclude cup competitions (they often have overlapping seasons)
+        league_filter: List of league names to include (None = all leagues)
     """
     print("=" * 60)
     print("OUT-OF-SAMPLE VALUE BET BACKTEST (per-league holdout)")
@@ -220,6 +392,15 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
         excluded = seasons[cup_mask]['league_name'].unique()
         seasons = seasons[~cup_mask]
         print(f"\nExcluded {len(excluded)} cup competitions: {', '.join(excluded)}")
+        print(f"Remaining: {len(seasons)} seasons across {seasons['league_id'].nunique()} leagues")
+
+    # Apply league filter if specified (exact match, case-insensitive)
+    if league_filter:
+        filter_lower = [name.lower() for name in league_filter]
+        league_mask = seasons['league_name'].str.lower().isin(filter_lower)
+        filtered_leagues = seasons[league_mask]['league_name'].unique()
+        seasons = seasons[league_mask]
+        print(f"\nFiltered to {len(filtered_leagues)} leagues: {', '.join(filtered_leagues)}")
         print(f"Remaining: {len(seasons)} seasons across {seasons['league_id'].nunique()} leagues")
 
     # Show available leagues and seasons
@@ -272,7 +453,25 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
             print(f"    Test:  {info['test_labels']}")
 
     print(f"\nTrain set: {len(train_features)} matches")
-    print(f"Test set: {len(test_features)} matches")
+    print(f"Test set: {len(test_features)} matches (before filtering)")
+
+    # Filter to only completed matches (exclude future/unplayed games)
+    now = int(time.time())
+    before_filter = len(test_features)
+    test_features = test_features[
+        (test_features["date_unix"] < now) &
+        (test_features["target_result"].notna()) &
+        (test_features["target_result"].isin(["H", "D", "A"]))
+    ].copy()
+    filtered_out = before_filter - len(test_features)
+    if filtered_out > 0:
+        print(f"  Filtered out {filtered_out} unplayed/incomplete matches")
+    print(f"Test set: {len(test_features)} matches (completed only)")
+
+    # Small sample warning
+    if len(test_features) < MIN_TEST_SIZE:
+        print(f"\n  ⚠️  WARNING: Test set has only {len(test_features)} matches (< {MIN_TEST_SIZE})")
+        print(f"     Results may have high variance. Consider using --holdout-seasons 2")
 
     if len(test_features) == 0:
         print("\nERROR: No test data! Need at least 2 seasons per league for holdout.")
@@ -302,7 +501,14 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
     predictions = predictor.predict(test_features)
     print(f"Made predictions for {len(predictions)} matches")
 
+    # Print calibration report
+    print_calibration_report(predictions, test_features)
+
     # Find value bets with different thresholds
+    # Note: Default markets are Draw, Over 2.5, BTTS (Home/Away excluded due to poor performance)
+    print(f"\nUsing markets: {', '.join(ValueBetFinder.DEFAULT_MARKETS)}")
+    print("(Home/Away excluded - use markets=ValueBetFinder.ALL_MARKETS to include)")
+
     for min_edge in [0.03, 0.05, 0.08, 0.10]:
         print(f"\n{'=' * 60}")
         print(f"MIN EDGE: {min_edge:.0%}")
@@ -330,6 +536,32 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
         for _, row in by_market.iterrows():
             print(f"    {row['market']:10s}: {row['total_bets']:3.0f} bets, "
                   f"win {row['win_rate']:.0%}, ROI {row['roi']:+.1f}%")
+
+        # By league (with bootstrapped 95% CI)
+        # Merge value_bets with test_features to get league info
+        bets_with_league = value_bets.merge(
+            test_features[["match_id", "league_id"]],
+            on="match_id"
+        )
+        if "league_id" in bets_with_league.columns:
+            # Get league names from seasons
+            league_names = seasons.drop_duplicates("league_id").set_index("league_id")["league_name"].to_dict()
+
+            print("\n  By league (95% CI):")
+            for league_id in bets_with_league["league_id"].dropna().unique():
+                league_bets = bets_with_league[bets_with_league["league_id"] == league_id]
+                league_name = league_names.get(league_id, f"League {league_id}")
+
+                # Calculate ROI with bootstrapped CI
+                if len(league_bets) >= 5:  # Need at least 5 bets for meaningful CI
+                    roi_mean, roi_lower, roi_upper = bootstrap_roi_ci(league_bets, stake=10.0)
+                    print(f"    {league_name:30s}: {len(league_bets):3} bets, "
+                          f"ROI {roi_mean:+.1f}% [{roi_lower:+.1f}%, {roi_upper:+.1f}%]")
+                else:
+                    # Not enough bets for CI
+                    bt = finder.backtest(league_bets, stake=10.0)
+                    print(f"    {league_name:30s}: {len(league_bets):3} bets, "
+                          f"ROI {bt['roi']:+.1f}% (too few for CI)")
 
     # Show some examples of value bets
     print("\n" + "=" * 60)
@@ -385,7 +617,21 @@ def run_in_sample_backtest():
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Run backtest on historical data")
+    parser = argparse.ArgumentParser(
+        description="Run backtest on historical data",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+League filter presets:
+  pl          Premier League only
+  norway      Norwegian leagues (Eliteserien, OBOS-ligaen)
+  pl+norway   Premier League + Norwegian leagues
+  top5        Top 5 European leagues
+
+Examples:
+  python run_backtest.py --leagues pl+norway --exclude-cups
+  python run_backtest.py --leagues "Premier League,Eliteserien"
+        """
+    )
     parser.add_argument("--in-sample", action="store_true",
                         help="Run in-sample backtest (not recommended)")
     parser.add_argument("--holdout-seasons", type=int, default=1,
@@ -394,6 +640,9 @@ def main():
                         help="Force regeneration of features (ignore cache)")
     parser.add_argument("--exclude-cups", action="store_true",
                         help="Exclude cup competitions (often have overlapping seasons)")
+    parser.add_argument("--leagues", type=str, default=None,
+                        help="Filter to specific leagues. Use preset (pl, norway, pl+norway, top5) "
+                             "or comma-separated list of league names")
     args = parser.parse_args()
 
     if args.regenerate:
@@ -402,12 +651,23 @@ def main():
             cache_path.unlink()
             print(f"Deleted feature cache: {cache_path}")
 
+    # Parse league filter
+    league_filter = None
+    if args.leagues:
+        if args.leagues in LEAGUE_FILTERS:
+            league_filter = LEAGUE_FILTERS[args.leagues]
+            print(f"Using league preset '{args.leagues}': {league_filter}")
+        else:
+            league_filter = [l.strip() for l in args.leagues.split(",")]
+            print(f"Using custom league filter: {league_filter}")
+
     if args.in_sample:
         run_in_sample_backtest()
     else:
         run_out_of_sample_backtest(
             holdout_seasons=args.holdout_seasons,
-            exclude_cups=args.exclude_cups
+            exclude_cups=args.exclude_cups,
+            league_filter=league_filter
         )
 
 

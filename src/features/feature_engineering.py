@@ -197,6 +197,39 @@ class FeatureEngineer:
             "h2h_matches": len(h2h)
         }
 
+    def _get_league_draw_rate(self, league_id: int, before_date: int, min_matches: int = 20) -> float:
+        """Get historical draw rate for a league before a given date.
+
+        This helps the model learn that some leagues (e.g., Scandinavian)
+        have systematically higher draw rates than others.
+
+        Args:
+            league_id: The league ID
+            before_date: Only use matches before this date
+            min_matches: Minimum matches required for reliable estimate
+
+        Returns:
+            Draw rate as a float (0.0-1.0), or global average if insufficient data
+        """
+        if league_id is None:
+            # No league info - return global average
+            global_draws = (self.matches["result"] == "D").sum()
+            return global_draws / len(self.matches) if len(self.matches) > 0 else 0.27
+
+        league_matches = self.matches[
+            (self.matches["league_id"] == league_id) &
+            (self.matches["date_unix"] < before_date)
+        ]
+
+        if len(league_matches) < min_matches:
+            # Not enough data - use global average from all matches before date
+            all_before = self.matches[self.matches["date_unix"] < before_date]
+            if len(all_before) == 0:
+                return 0.27  # Default draw rate
+            return (all_before["result"] == "D").sum() / len(all_before)
+
+        return (league_matches["result"] == "D").sum() / len(league_matches)
+
     def _get_season_position(self, team_id: int, before_date: int, season_id: int = None) -> dict:
         """Get team's current league position within the same season"""
 
@@ -265,6 +298,7 @@ class FeatureEngineer:
             home_id = match["home_team_id"]
             away_id = match["away_team_id"]
             season_id = match.get("season_id")
+            league_id = match.get("league_id")
 
             # Get all stats
             home_form = self._get_team_form(home_id, match_date)
@@ -281,6 +315,9 @@ class FeatureEngineer:
 
             home_pos = self._get_season_position(home_id, match_date, season_id)
             away_pos = self._get_season_position(away_id, match_date, season_id)
+
+            # League-level feature (helps model learn different draw rates per league)
+            league_draw_rate = self._get_league_draw_rate(league_id, match_date)
 
             features = {
                 # Match identifiers
@@ -322,6 +359,9 @@ class FeatureEngineer:
                 "form_ppg_diff": home_form["form_ppg"] - away_form["form_ppg"],
                 "position_diff": away_pos["position"] - home_pos["position"],  # Positive = home better
                 "xg_diff": home_form["form_xg"] - away_form["form_xg"],
+
+                # League-level features (helps model learn different draw rates per league)
+                "league_draw_rate": league_draw_rate,
 
                 # H2H
                 "h2h_home_wins": h2h["h2h_home_wins"],

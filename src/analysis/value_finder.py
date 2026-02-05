@@ -13,19 +13,26 @@ from pathlib import Path
 class ValueBetFinder:
     """Find value bets by comparing model probabilities to odds"""
 
+    # Default markets to use (Home/Away/Over 2.5 excluded due to poor backtest performance)
+    DEFAULT_MARKETS = ["Draw", "BTTS"]
+    ALL_MARKETS = ["Home", "Draw", "Away", "Over 2.5", "BTTS"]
+
     def __init__(self, min_edge: float = 0.05, min_odds: float = 1.5, max_odds: float = 10.0,
-                 normalize_1x2: bool = True):
+                 normalize_1x2: bool = True, markets: List[str] = None):
         """
         Args:
             min_edge: Minimum edge (model_prob - implied_prob) to consider a value bet
             min_odds: Minimum odds to consider (avoid very low odds)
             max_odds: Maximum odds to consider (avoid very high variance)
             normalize_1x2: Whether to normalize 1X2 implied probabilities to remove overround
+            markets: List of markets to consider. Default: ["Draw", "Over 2.5", "BTTS"]
+                     Use ValueBetFinder.ALL_MARKETS for all markets including Home/Away.
         """
         self.min_edge = min_edge
         self.min_odds = min_odds
         self.max_odds = max_odds
         self.normalize_1x2 = normalize_1x2
+        self.enabled_markets = set(markets if markets is not None else self.DEFAULT_MARKETS)
 
     def odds_to_prob(self, odds: float) -> float:
         """Convert decimal odds to raw implied probability (includes margin)"""
@@ -156,6 +163,10 @@ class ValueBetFinder:
             ]
 
             for market, model_prob, odds, implied_prob, actual_win in markets:
+                # Skip markets not in enabled list
+                if market not in self.enabled_markets:
+                    continue
+
                 if odds is None or odds <= 0:
                     continue
 
