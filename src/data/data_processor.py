@@ -34,6 +34,7 @@ class DataProcessor:
             CREATE TABLE IF NOT EXISTS matches (
                 id INTEGER PRIMARY KEY,
                 season_id INTEGER,
+                league_id INTEGER,
                 season TEXT,
                 game_week INTEGER,
                 date_unix INTEGER,
@@ -135,13 +136,17 @@ class DataProcessor:
             )
         """)
 
-        # Seasons table
+        # Seasons table (with league metadata for proper holdout splits)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS seasons (
                 id INTEGER PRIMARY KEY,
-                name TEXT,
+                league_id INTEGER,
+                league_name TEXT,
                 country TEXT,
                 year TEXT,
+                season_label TEXT,
+                start_date INTEGER,
+                end_date INTEGER,
                 UNIQUE(id)
             )
         """)
@@ -149,8 +154,14 @@ class DataProcessor:
         conn.commit()
         conn.close()
 
-    def process_matches(self, matches_data: list, season_id: int) -> pd.DataFrame:
-        """Convert raw match data to DataFrame"""
+    def process_matches(self, matches_data: list, season_id: int, league_id: int = None) -> pd.DataFrame:
+        """Convert raw match data to DataFrame
+
+        Args:
+            matches_data: Raw match data from API
+            season_id: Season ID from FootyStats
+            league_id: League ID from FootyStats (optional, for grouping)
+        """
 
         records = []
         for m in matches_data:
@@ -167,6 +178,7 @@ class DataProcessor:
             record = {
                 "id": m.get("id"),
                 "season_id": season_id,
+                "league_id": league_id,
                 "season": m.get("season"),
                 "game_week": m.get("game_week"),
                 "date_unix": m.get("date_unix"),
@@ -283,6 +295,68 @@ class DataProcessor:
             UNION
             SELECT DISTINCT away_team_id as id, away_team as name
             FROM matches
+        """, conn)
+        conn.close()
+        return df
+
+    def save_season(self, season_id: int, league_id: int, league_name: str,
+                    country: str, year: str, season_label: str = None):
+        """Save season metadata to database"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO seasons
+            (id, league_id, league_name, country, year, season_label)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (season_id, league_id, league_name, country, year, season_label))
+        conn.commit()
+        conn.close()
+
+    def update_season_dates(self, season_id: int, start_date: int, end_date: int):
+        """Update season start/end dates from match data"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE seasons SET start_date = ?, end_date = ?
+            WHERE id = ?
+        """, (start_date, end_date, season_id))
+        conn.commit()
+        conn.close()
+
+    def load_seasons(self) -> pd.DataFrame:
+        """Load all seasons with metadata"""
+        conn = self._get_connection()
+        df = pd.read_sql_query("SELECT * FROM seasons", conn)
+        conn.close()
+        return df
+
+    def load_matches_with_league(self) -> pd.DataFrame:
+        """Load matches joined with season/league info"""
+        conn = self._get_connection()
+        df = pd.read_sql_query("""
+            SELECT m.*, s.league_id as s_league_id, s.league_name, s.country,
+                   s.start_date as season_start, s.end_date as season_end
+            FROM matches m
+            LEFT JOIN seasons s ON m.season_id = s.id
+        """, conn)
+        # Use season's league_id if match doesn't have it
+        if "s_league_id" in df.columns:
+            df["league_id"] = df["league_id"].fillna(df["s_league_id"])
+            df = df.drop(columns=["s_league_id"])
+        conn.close()
+        return df
+
+    def get_seasons_by_league(self) -> pd.DataFrame:
+        """Get seasons grouped by league with date ranges"""
+        conn = self._get_connection()
+        df = pd.read_sql_query("""
+            SELECT s.id as season_id, s.league_id, s.league_name, s.country,
+                   s.year, s.season_label, s.start_date, s.end_date,
+                   COUNT(m.id) as match_count
+            FROM seasons s
+            LEFT JOIN matches m ON s.id = m.season_id
+            GROUP BY s.id
+            ORDER BY s.league_id, s.start_date
         """, conn)
         conn.close()
         return df

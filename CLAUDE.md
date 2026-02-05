@@ -71,11 +71,18 @@ source .venv/bin/activate
 python scripts/download_all_leagues.py
 ```
 
-### Kjør backtest (out-of-sample)
+### Kjør backtest (out-of-sample med per-league holdout)
 ```bash
-python scripts/run_backtest.py                    # Default: hold-out siste sesong
-python scripts/run_backtest.py --holdout-seasons 2 # Hold ut 2 sesonger
+python scripts/run_backtest.py                    # Default: hold-out siste sesong per liga
+python scripts/run_backtest.py --holdout-seasons 2 # Hold ut 2 sesonger per liga
 python scripts/run_backtest.py --in-sample         # In-sample (kun for referanse)
+```
+
+**Merk:** Backtest krever sesong-metadata i databasen. Kjør `download_all_leagues.py` for å populere dette.
+
+### Backfill sesong-metadata (for eksisterende data)
+```bash
+python scripts/backfill_seasons.py   # Oppdater seasons-tabell med liga-info
 ```
 
 ### Se dagens odds
@@ -94,6 +101,15 @@ python scripts/train_model.py
 
 1. **FootyStats cache**: Etter å velge ligaer må man vente 30 min før data er tilgjengelig.
 2. **Norsk Tipping**: Bruker Tipping-kuponger (sannsynligheter), ikke faktiske bookmakerodds.
+
+## Sesong-håndtering
+
+Systemet støtter både kalenderår-sesonger (Norge) og Aug-Mai sesonger (Premier League):
+
+- **Per-league holdout**: Backtest holder ut siste N sesonger *per liga*, ikke globalt
+- **Ingen måned-heuristikk**: Bruker `season_id` og faktiske kampdatoer fra FootyStats
+- **Automatisk sesong-label**: "2024" for kalenderår, "2024/2025" for Aug-Mai
+- **Leakage-verifisering**: Sjekker at max(train_date) < min(test_date) per liga
 
 ## Viktig ved endringer
 

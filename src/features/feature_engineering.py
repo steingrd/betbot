@@ -285,6 +285,8 @@ class FeatureEngineer:
             features = {
                 # Match identifiers
                 "match_id": match["id"],
+                "season_id": match.get("season_id"),
+                "league_id": match.get("league_id"),
                 "date_unix": match_date,
                 "game_week": match["game_week"],
                 "home_team": match["home_team"],

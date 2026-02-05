@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Download all available league data from FootyStats API.
+
+Saves both match data and season metadata for proper per-league holdout splits.
 """
 
 import sys
-import json
-import time
 from pathlib import Path
 from datetime import datetime
 
@@ -49,10 +49,11 @@ def main():
 
     print(f"   ✓ Found {len(leagues)} leagues")
 
-    # Collect all season IDs
-    print("\n3. Collecting seasons...")
+    # Collect all season info with league metadata
+    print("\n3. Collecting seasons with league metadata...")
     all_seasons = []
     for league in leagues:
+        league_id = league.get("id")
         league_name = league.get("name", "Unknown")
         country = league.get("country", "")
         seasons = league.get("season", [])
@@ -61,22 +62,36 @@ def main():
             for s in seasons:
                 all_seasons.append({
                     "season_id": s["id"],
+                    "league_id": league_id,
+                    "league_name": league_name,
+                    "country": country,
                     "year": s.get("year", "Unknown"),
-                    "league": league_name,
-                    "country": country
                 })
         elif seasons:
             all_seasons.append({
                 "season_id": seasons,
+                "league_id": league_id,
+                "league_name": league_name,
+                "country": country,
                 "year": "Current",
-                "league": league_name,
-                "country": country
             })
 
     print(f"   ✓ Found {len(all_seasons)} seasons to download")
 
+    # Group seasons by league for display
+    leagues_found = {}
+    for s in all_seasons:
+        key = f"{s['country']} {s['league_name']}"
+        if key not in leagues_found:
+            leagues_found[key] = []
+        leagues_found[key].append(s["year"])
+
+    print("\n   Leagues and seasons:")
+    for league, years in sorted(leagues_found.items()):
+        print(f"     {league}: {', '.join(str(y) for y in years)}")
+
     # Download matches for each season
-    print("\n4. Downloading match data...")
+    print("\n4. Downloading match data and saving metadata...")
     print("-" * 60)
 
     downloaded = 0
@@ -85,9 +100,20 @@ def main():
 
     for i, season in enumerate(all_seasons):
         season_id = season["season_id"]
+        league_id = season["league_id"]
         progress = f"[{i+1}/{len(all_seasons)}]"
 
         try:
+            # Save season metadata first
+            processor.save_season(
+                season_id=season_id,
+                league_id=league_id,
+                league_name=season["league_name"],
+                country=season["country"],
+                year=season["year"],
+                season_label=f"{season['country']} {season['league_name']} {season['year']}"
+            )
+
             # Get matches
             response = client.get_league_matches(season_id)
 
@@ -97,27 +123,39 @@ def main():
                 matches = response if isinstance(response, list) else []
 
             if not matches:
-                print(f"{progress} {season['country']} {season['league']} {season['year']}: No matches")
+                print(f"{progress} {season['country']} {season['league_name']} {season['year']}: No matches")
                 continue
 
-            # Process and save
-            df = processor.process_matches(matches, season_id)
+            # Process and save with league_id
+            df = processor.process_matches(matches, season_id, league_id=league_id)
 
             # Check if already in database (avoid duplicates)
             existing = processor.load_matches(season_id)
             if len(existing) > 0:
-                print(f"{progress} {season['country']} {season['league']} {season['year']}: Already in DB ({len(existing)} matches)")
+                print(f"{progress} {season['country']} {season['league_name']} {season['year']}: Already in DB ({len(existing)} matches)")
+                # Still update season dates from existing data
+                if len(existing) > 0:
+                    start_date = int(existing["date_unix"].min())
+                    end_date = int(existing["date_unix"].max())
+                    processor.update_season_dates(season_id, start_date, end_date)
                 continue
 
             processor.save_matches(df)
+
+            # Update season start/end dates
+            if len(df) > 0:
+                start_date = int(df["date_unix"].min())
+                end_date = int(df["date_unix"].max())
+                processor.update_season_dates(season_id, start_date, end_date)
+
             downloaded += 1
             total_matches += len(matches)
-            print(f"{progress} {season['country']} {season['league']} {season['year']}: ✓ {len(matches)} matches")
+            print(f"{progress} {season['country']} {season['league_name']} {season['year']}: ✓ {len(matches)} matches")
 
         except Exception as e:
             failed += 1
             error_msg = str(e)
-            print(f"{progress} {season['country']} {season['league']} {season['year']}: ✗ {error_msg}")
+            print(f"{progress} {season['country']} {season['league_name']} {season['year']}: ✗ {error_msg}")
 
     # Summary
     print()
@@ -132,12 +170,20 @@ def main():
 
     # Show database stats
     all_matches = processor.load_matches()
-    print(f"Database now contains {len(all_matches)} matches")
+    seasons_df = processor.load_seasons()
 
-    if len(all_matches) > 0:
-        print(f"  Seasons: {all_matches['season'].nunique()}")
-        print(f"  Teams: {all_matches['home_team'].nunique()}")
-        print(f"  Date range: {all_matches['date_unix'].min()} - {all_matches['date_unix'].max()}")
+    print(f"Database now contains:")
+    print(f"  {len(all_matches)} matches")
+    print(f"  {len(seasons_df)} seasons")
+
+    if len(seasons_df) > 0:
+        print(f"\nSeasons by league:")
+        by_league = seasons_df.groupby(["country", "league_name"]).agg(
+            seasons=("id", "count"),
+            years=("year", lambda x: ", ".join(str(y) for y in sorted(x)))
+        ).reset_index()
+        for _, row in by_league.iterrows():
+            print(f"  {row['country']} {row['league_name']}: {row['seasons']} seasons ({row['years']})")
 
 
 if __name__ == "__main__":

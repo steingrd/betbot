@@ -2,13 +2,14 @@
 """
 Run out-of-sample backtest on historical data.
 
-This script trains on earlier seasons and tests on a hold-out season
-to provide realistic performance estimates.
+Uses season_id and per-league holdout for proper train/test splits.
+Works correctly for both calendar-year leagues (Norway) and Aug-May leagues (PL).
 """
 
 import sys
 from pathlib import Path
 import pandas as pd
+from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -19,62 +20,161 @@ from models.match_predictor import MatchPredictor
 from analysis.value_finder import ValueBetFinder
 
 
-def get_season_year(date, season_start_month: int = 8):
+def format_season_label(start_date: int, end_date: int) -> str:
     """
-    Determine season year from date.
+    Create human-readable season label from date range.
 
-    Args:
-        date: datetime object
-        season_start_month: Month when season starts (default 8 = August)
-            - Use 8 for European leagues (Aug-May)
-            - Use 1 for calendar-year leagues (MLS, etc.)
-
-    Returns:
-        Season year (year when season started)
+    - Calendar year (Jan-Dec): "2024"
+    - Aug-May season: "2024/2025"
     """
-    if date.month >= season_start_month:
-        return date.year
-    return date.year - 1
+    if start_date is None or end_date is None:
+        return "Unknown"
+
+    start = datetime.fromtimestamp(start_date)
+    end = datetime.fromtimestamp(end_date)
+
+    # If season spans two calendar years and starts in Aug-Dec, it's a Aug-May style
+    if start.year != end.year and start.month >= 7:
+        return f"{start.year}/{end.year}"
+    else:
+        # Calendar year season
+        return str(start.year)
 
 
-# Season start month (8 = August for European leagues)
-# Change to 1 for calendar-year leagues like MLS
-SEASON_START_MONTH = 8
+def get_season_info_by_league(processor: DataProcessor) -> pd.DataFrame:
+    """
+    Get season info grouped by league with actual date ranges.
 
+    Uses season_id and start/end dates from database, not month heuristics.
+    """
+    seasons = processor.get_seasons_by_league()
 
-def get_season_info(features: pd.DataFrame) -> pd.DataFrame:
-    """Get info about available seasons"""
-    if "date_unix" not in features.columns:
+    if len(seasons) == 0:
+        print("WARNING: No season metadata found. Run download_all_leagues.py first.")
         return pd.DataFrame()
 
-    features = features.copy()
-    features["date"] = pd.to_datetime(features["date_unix"], unit="s")
-    features["year"] = features["date"].dt.year
-    features["month"] = features["date"].dt.month
-
-    # Determine season based on configured start month
-    features["season_year"] = features["date"].apply(
-        lambda d: get_season_year(d, SEASON_START_MONTH)
+    # Add display label
+    seasons["display_label"] = seasons.apply(
+        lambda r: format_season_label(r["start_date"], r["end_date"]), axis=1
     )
 
-    season_stats = features.groupby("season_year").agg(
-        matches=("match_id", "count"),
-        start=("date", "min"),
-        end=("date", "max")
-    ).reset_index()
+    return seasons
 
-    return season_stats
+
+def split_train_test_per_league(
+    features: pd.DataFrame,
+    seasons: pd.DataFrame,
+    holdout_seasons: int = 1
+) -> tuple:
+    """
+    Split data into train/test per league.
+
+    For each league, holds out the N most recent seasons (by start_date).
+    This handles both calendar-year and Aug-May seasons correctly.
+
+    Args:
+        features: DataFrame with match features (must have season_id)
+        seasons: DataFrame with season metadata (from get_seasons_by_league)
+        holdout_seasons: Number of most recent seasons per league to hold out
+
+    Returns:
+        (train_features, test_features, split_info)
+    """
+    if "season_id" not in features.columns:
+        raise ValueError("features must have season_id column")
+
+    # Get league_id for each season
+    season_to_league = seasons.set_index("season_id")["league_id"].to_dict()
+    features = features.copy()
+
+    # Add league_id to features if missing
+    if "league_id" not in features.columns or features["league_id"].isna().all():
+        features["league_id"] = features["season_id"].map(season_to_league)
+
+    train_seasons = []
+    test_seasons = []
+    split_info = []
+
+    # Process each league separately
+    for league_id in features["league_id"].dropna().unique():
+        league_seasons = seasons[seasons["league_id"] == league_id].copy()
+
+        if len(league_seasons) < 2:
+            league_name = league_seasons["league_name"].iloc[0] if len(league_seasons) > 0 else f"League {league_id}"
+            print(f"  WARNING: {league_name} has only {len(league_seasons)} season(s), skipping holdout")
+            # Include all in training
+            train_seasons.extend(league_seasons["season_id"].tolist())
+            split_info.append({
+                "league_id": league_id,
+                "league_name": league_name,
+                "train_seasons": len(league_seasons),
+                "test_seasons": 0,
+                "warning": "< 2 seasons"
+            })
+            continue
+
+        # Sort by start_date to get chronological order
+        league_seasons = league_seasons.sort_values("start_date")
+
+        # Split: all but last N for training, last N for testing
+        train_season_ids = league_seasons["season_id"].iloc[:-holdout_seasons].tolist()
+        test_season_ids = league_seasons["season_id"].iloc[-holdout_seasons:].tolist()
+
+        train_seasons.extend(train_season_ids)
+        test_seasons.extend(test_season_ids)
+
+        league_name = league_seasons["league_name"].iloc[0]
+        train_labels = league_seasons[league_seasons["season_id"].isin(train_season_ids)]["display_label"].tolist()
+        test_labels = league_seasons[league_seasons["season_id"].isin(test_season_ids)]["display_label"].tolist()
+
+        split_info.append({
+            "league_id": league_id,
+            "league_name": league_name,
+            "country": league_seasons["country"].iloc[0],
+            "train_seasons": len(train_season_ids),
+            "test_seasons": len(test_season_ids),
+            "train_labels": train_labels,
+            "test_labels": test_labels
+        })
+
+    train_features = features[features["season_id"].isin(train_seasons)].copy()
+    test_features = features[features["season_id"].isin(test_seasons)].copy()
+
+    return train_features, test_features, split_info
+
+
+def verify_no_leakage(train_features: pd.DataFrame, test_features: pd.DataFrame) -> bool:
+    """Verify that max(train_date) < min(test_date) per league"""
+    all_ok = True
+
+    for league_id in test_features["league_id"].dropna().unique():
+        train_league = train_features[train_features["league_id"] == league_id]
+        test_league = test_features[test_features["league_id"] == league_id]
+
+        if len(train_league) == 0 or len(test_league) == 0:
+            continue
+
+        max_train = train_league["date_unix"].max()
+        min_test = test_league["date_unix"].min()
+
+        if max_train >= min_test:
+            print(f"  WARNING: Potential leakage in league {league_id}!")
+            print(f"    Max train date: {datetime.fromtimestamp(max_train)}")
+            print(f"    Min test date: {datetime.fromtimestamp(min_test)}")
+            all_ok = False
+
+    return all_ok
 
 
 def run_out_of_sample_backtest(holdout_seasons: int = 1):
     """
-    Run proper out-of-sample backtest.
+    Run proper out-of-sample backtest with per-league holdout.
 
     Args:
-        holdout_seasons: Number of most recent seasons to use as test set
+        holdout_seasons: Number of most recent seasons per league to use as test set
     """
     print("=" * 60)
-    print("OUT-OF-SAMPLE VALUE BET BACKTEST")
+    print("OUT-OF-SAMPLE VALUE BET BACKTEST (per-league holdout)")
     print("=" * 60)
 
     # Load data
@@ -82,41 +182,59 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
     matches = processor.load_matches()
     print(f"Loaded {len(matches)} matches")
 
+    # Load season metadata
+    seasons = get_season_info_by_league(processor)
+    if len(seasons) == 0:
+        print("\nERROR: No season metadata. Run 'python scripts/download_all_leagues.py' first.")
+        print("This will populate the seasons table with league info needed for proper splits.")
+        return
+
+    print(f"Loaded {len(seasons)} seasons across {seasons['league_id'].nunique()} leagues")
+
+    # Show available leagues and seasons
+    print(f"\nAvailable leagues and seasons:")
+    for league_id in seasons["league_id"].unique():
+        league_seasons = seasons[seasons["league_id"] == league_id].sort_values("start_date")
+        league_name = f"{league_seasons['country'].iloc[0]} {league_seasons['league_name'].iloc[0]}"
+        season_labels = league_seasons["display_label"].tolist()
+        match_count = league_seasons["match_count"].sum()
+        print(f"  {league_name}: {len(league_seasons)} seasons ({', '.join(season_labels)}) - {match_count} matches")
+
     # Generate features
+    print(f"\nGenerating features...")
     engineer = FeatureEngineer(matches)
     features = engineer.generate_features()
     print(f"Generated features for {len(features)} matches")
 
-    # Get season info
-    season_info = get_season_info(features)
-    print(f"\nAvailable seasons:")
-    for _, row in season_info.iterrows():
-        print(f"  {int(row['season_year'])}/{int(row['season_year'])+1}: "
-              f"{row['matches']} matches ({row['start'].strftime('%Y-%m-%d')} - {row['end'].strftime('%Y-%m-%d')})")
-
-    # Determine train/test split by season
-    features["date"] = pd.to_datetime(features["date_unix"], unit="s")
-    features["season_year"] = features["date"].apply(
-        lambda d: get_season_year(d, SEASON_START_MONTH)
+    # Split train/test per league
+    print(f"\nSplitting data (holding out {holdout_seasons} season(s) per league)...")
+    train_features, test_features, split_info = split_train_test_per_league(
+        features, seasons, holdout_seasons
     )
 
-    all_seasons = sorted(features["season_year"].unique())
-
-    if len(all_seasons) < 2:
-        print("\nError: Need at least 2 seasons for out-of-sample backtest")
-        return
-
-    train_seasons = all_seasons[:-holdout_seasons]
-    test_seasons = all_seasons[-holdout_seasons:]
-
-    print(f"\nTrain seasons: {[f'{s}/{s+1}' for s in train_seasons]}")
-    print(f"Test seasons (hold-out): {[f'{s}/{s+1}' for s in test_seasons]}")
-
-    train_features = features[features["season_year"].isin(train_seasons)].copy()
-    test_features = features[features["season_year"].isin(test_seasons)].copy()
+    # Show split info
+    print(f"\nTrain/test split per league:")
+    for info in split_info:
+        if "warning" in info:
+            print(f"  {info['league_name']}: {info['train_seasons']} train, {info['test_seasons']} test [{info['warning']}]")
+        else:
+            print(f"  {info['country']} {info['league_name']}:")
+            print(f"    Train: {info['train_labels']}")
+            print(f"    Test:  {info['test_labels']}")
 
     print(f"\nTrain set: {len(train_features)} matches")
     print(f"Test set: {len(test_features)} matches")
+
+    if len(test_features) == 0:
+        print("\nERROR: No test data! Need at least 2 seasons per league for holdout.")
+        return
+
+    # Verify no data leakage
+    print(f"\nVerifying no data leakage...")
+    if verify_no_leakage(train_features, test_features):
+        print("  ✓ No leakage detected (max train date < min test date per league)")
+    else:
+        print("  ✗ Potential leakage detected! Check warnings above.")
 
     # Train model on training data only
     print("\n" + "=" * 60)
@@ -124,7 +242,7 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
     print("=" * 60)
 
     predictor = MatchPredictor()
-    # Use all training data since we have external hold-out season(s)
+    # Use all training data since we have external hold-out
     results = predictor.train(train_features, test_size=0.0)
 
     # Make predictions on hold-out test set
@@ -149,13 +267,13 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
             continue
 
         # Overall backtest
-        results = finder.backtest(value_bets, stake=10.0)
-        print(f"\n  Total bets: {results['total_bets']}")
-        print(f"  Win rate: {results['win_rate']:.1%}")
-        print(f"  Avg odds: {results['avg_odds']:.2f}")
-        print(f"  Total staked: kr {results['total_staked']:.0f}")
-        print(f"  Profit: kr {results['profit']:.2f}")
-        print(f"  ROI: {results['roi']:.1f}%")
+        bt_results = finder.backtest(value_bets, stake=10.0)
+        print(f"\n  Total bets: {bt_results['total_bets']}")
+        print(f"  Win rate: {bt_results['win_rate']:.1%}")
+        print(f"  Avg odds: {bt_results['avg_odds']:.2f}")
+        print(f"  Total staked: kr {bt_results['total_staked']:.0f}")
+        print(f"  Profit: kr {bt_results['profit']:.2f}")
+        print(f"  ROI: {bt_results['roi']:.1f}%")
 
         # By market
         print("\n  By market:")
@@ -222,7 +340,7 @@ def main():
     parser.add_argument("--in-sample", action="store_true",
                         help="Run in-sample backtest (not recommended)")
     parser.add_argument("--holdout-seasons", type=int, default=1,
-                        help="Number of seasons to hold out for testing (default: 1)")
+                        help="Number of seasons per league to hold out for testing (default: 1)")
     args = parser.parse_args()
 
     if args.in_sample:
