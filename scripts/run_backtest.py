@@ -184,12 +184,16 @@ def verify_no_leakage(train_features: pd.DataFrame, test_features: pd.DataFrame)
     return all_ok
 
 
-def run_out_of_sample_backtest(holdout_seasons: int = 1):
+CUP_KEYWORDS = ['Cup', 'Pokal', 'Copa', 'Coppa', 'Coupe', 'Super Cup']
+
+
+def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = False):
     """
     Run proper out-of-sample backtest with per-league holdout.
 
     Args:
         holdout_seasons: Number of most recent seasons per league to use as test set
+        exclude_cups: Exclude cup competitions (they often have overlapping seasons)
     """
     print("=" * 60)
     print("OUT-OF-SAMPLE VALUE BET BACKTEST (per-league holdout)")
@@ -208,6 +212,15 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
         return
 
     print(f"Loaded {len(seasons)} seasons across {seasons['league_id'].nunique()} leagues")
+
+    # Exclude cup competitions if requested
+    if exclude_cups:
+        cup_pattern = '|'.join(CUP_KEYWORDS)
+        cup_mask = seasons['league_name'].str.contains(cup_pattern, case=False, na=False)
+        excluded = seasons[cup_mask]['league_name'].unique()
+        seasons = seasons[~cup_mask]
+        print(f"\nExcluded {len(excluded)} cup competitions: {', '.join(excluded)}")
+        print(f"Remaining: {len(seasons)} seasons across {seasons['league_id'].nunique()} leagues")
 
     # Show available leagues and seasons
     print(f"\nAvailable leagues and seasons:")
@@ -379,6 +392,8 @@ def main():
                         help="Number of seasons per league to hold out for testing (default: 1)")
     parser.add_argument("--regenerate", action="store_true",
                         help="Force regeneration of features (ignore cache)")
+    parser.add_argument("--exclude-cups", action="store_true",
+                        help="Exclude cup competitions (often have overlapping seasons)")
     args = parser.parse_args()
 
     if args.regenerate:
@@ -390,7 +405,10 @@ def main():
     if args.in_sample:
         run_in_sample_backtest()
     else:
-        run_out_of_sample_backtest(holdout_seasons=args.holdout_seasons)
+        run_out_of_sample_backtest(
+            holdout_seasons=args.holdout_seasons,
+            exclude_cups=args.exclude_cups
+        )
 
 
 if __name__ == "__main__":
