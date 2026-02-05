@@ -7,12 +7,30 @@ Works correctly for both calendar-year leagues (Norway) and Aug-May leagues (PL)
 """
 
 import sys
+import time
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+
+def print_progress(current, total, start_time=[None]):
+    """Print progress during feature generation"""
+    if start_time[0] is None:
+        start_time[0] = time.time()
+
+    elapsed = time.time() - start_time[0]
+    percent = (current / total) * 100
+    rate = current / elapsed if elapsed > 0 else 0
+    remaining = (total - current) / rate if rate > 0 else 0
+
+    mins_elapsed = int(elapsed // 60)
+    mins_remaining = int(remaining // 60)
+
+    print(f"\r  Progress: {percent:5.1f}% ({current:,}/{total:,}) - "
+          f"{mins_elapsed}m elapsed, ~{mins_remaining}m remaining", end="", flush=True)
 
 from data.data_processor import DataProcessor
 from features.feature_engineering import FeatureEngineer
@@ -212,13 +230,15 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1):
         if "season_id" not in features.columns or "league_id" not in features.columns:
             print("Cache missing season_id/league_id - regenerating...")
             engineer = FeatureEngineer(matches)
-            features = engineer.generate_features()
+            features = engineer.generate_features(progress_callback=print_progress)
+            print()  # Newline after progress
             features.to_csv(features_cache, index=False)
             print(f"Generated and cached {len(features)} features")
     else:
         print(f"\nGenerating features (this takes a while first time)...")
         engineer = FeatureEngineer(matches)
-        features = engineer.generate_features()
+        features = engineer.generate_features(progress_callback=print_progress)
+        print()  # Newline after progress
         features.to_csv(features_cache, index=False)
         print(f"Generated and cached {len(features)} features to {features_cache.name}")
 
