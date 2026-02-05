@@ -50,13 +50,21 @@ def main():
     print(f"   ✓ Found {len(leagues)} leagues")
 
     # Collect all season info with league metadata
+    # Note: FootyStats API doesn't provide league_id, so we generate one from country+name
     print("\n3. Collecting seasons with league metadata...")
     all_seasons = []
+    league_id_map = {}  # (country, name) -> generated_id
+
     for league in leagues:
-        league_id = league.get("id")
         league_name = league.get("name", "Unknown")
         country = league.get("country", "")
         seasons = league.get("season", [])
+
+        # Generate stable league_id from country + name
+        league_key = (country, league_name)
+        if league_key not in league_id_map:
+            league_id_map[league_key] = hash(league_key) % (10**9)
+        league_id = league_id_map[league_key]
 
         if isinstance(seasons, list):
             for s in seasons:

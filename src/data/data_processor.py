@@ -151,6 +151,26 @@ class DataProcessor:
             )
         """)
 
+        # Migrate existing seasons table if missing columns
+        cursor.execute("PRAGMA table_info(seasons)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        new_cols = [
+            ("league_id", "INTEGER"),
+            ("league_name", "TEXT"),
+            ("season_label", "TEXT"),
+            ("start_date", "INTEGER"),
+            ("end_date", "INTEGER"),
+        ]
+        for col_name, col_type in new_cols:
+            if col_name not in existing_cols:
+                cursor.execute(f"ALTER TABLE seasons ADD COLUMN {col_name} {col_type}")
+
+        # Migrate existing matches table if missing league_id
+        cursor.execute("PRAGMA table_info(matches)")
+        existing_cols = {row[1] for row in cursor.fetchall()}
+        if "league_id" not in existing_cols:
+            cursor.execute("ALTER TABLE matches ADD COLUMN league_id INTEGER")
+
         conn.commit()
         conn.close()
 
@@ -300,15 +320,19 @@ class DataProcessor:
         return df
 
     def save_season(self, season_id: int, league_id: int, league_name: str,
-                    country: str, year: str, season_label: str = None):
+                    country: str, year, season_label: str = None):
         """Save season metadata to database"""
         conn = self._get_connection()
         cursor = conn.cursor()
+        # Ensure proper types
+        season_id = int(season_id) if season_id is not None else None
+        league_id = int(league_id) if league_id is not None else None
+        year_str = str(year) if year is not None else None
         cursor.execute("""
             INSERT OR REPLACE INTO seasons
             (id, league_id, league_name, country, year, season_label)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (season_id, league_id, league_name, country, year, season_label))
+        """, (season_id, league_id, league_name, country, year_str, season_label))
         conn.commit()
         conn.close()
 

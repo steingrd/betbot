@@ -59,12 +59,20 @@ def main():
         leagues = []
 
     # Build season -> league mapping
+    # Note: FootyStats API doesn't provide league_id, so we generate one from country+name
     season_info = {}
+    league_id_map = {}  # (country, name) -> generated_id
+
     for league in leagues:
-        league_id = league.get("id")
         league_name = league.get("name", "Unknown")
         country = league.get("country", "")
         seasons = league.get("season", [])
+
+        # Generate stable league_id from country + name
+        league_key = (country, league_name)
+        if league_key not in league_id_map:
+            league_id_map[league_key] = hash(league_key) % (10**9)  # Stable hash
+        league_id = league_id_map[league_key]
 
         if isinstance(seasons, list):
             for s in seasons:
