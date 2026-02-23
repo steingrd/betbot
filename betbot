@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# BetBot TUI launcher
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Activate virtual environment if not already active
+if [ -z "$VIRTUAL_ENV" ]; then
+    source .venv/bin/activate
+fi
+
+exec python scripts/run_tui.py "$@"
