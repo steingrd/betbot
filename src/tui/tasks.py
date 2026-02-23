@@ -1,13 +1,20 @@
-"""TaskQueue - FIFO task queue with background download integration."""
+"""TaskQueue - FIFO task queue with background download/training integration."""
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import io
+import json
+import random
 import sqlite3
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 from textual.message import Message
 
 
@@ -184,3 +191,219 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
 
     except Exception as e:
         return DownloadResult(task=task, error=str(e))
+
+
+# --- Training Messages ---
+
+
+class TrainingProgress(Message):
+    """Posted from worker thread to update UI on training progress."""
+
+    def __init__(self, step: str, detail: str, percent: int | None = None) -> None:
+        self.step = step
+        self.detail = detail
+        self.percent = percent
+        super().__init__()
+
+
+class TrainingFinished(Message):
+    """Posted when training is complete."""
+
+    def __init__(self, report: dict) -> None:
+        self.report = report
+        super().__init__()
+
+
+class TrainingError(Message):
+    """Posted when training fails fatally."""
+
+    def __init__(self, error: str) -> None:
+        self.error = error
+        super().__init__()
+
+
+class _ProgressWriter(io.TextIOBase):
+    """StringIO replacement that posts TrainingProgress for each line written by print()."""
+
+    def __init__(self, app, step: str):
+        self._app = app
+        self._step = step
+        self._buffer = ""
+
+    def write(self, s: str) -> int:
+        self._buffer += s
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            line = line.strip()
+            if line:
+                self._app.post_message(TrainingProgress(step=self._step, detail=line))
+        return len(s)
+
+    def flush(self) -> None:
+        pass
+
+
+def run_training(app, worker) -> None:
+    """Run feature engineering + model training in a worker thread.
+
+    Args:
+        app: The BetBotApp instance (for posting messages and call_from_thread)
+        worker: The current worker (for cancellation checks)
+    """
+    from src.data.data_processor import DataProcessor
+    from src.features.feature_engineering import FeatureEngineer
+    from src.models.match_predictor import MatchPredictor
+
+    start_time = time.time()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Reproducibility
+    random.seed(42)
+    np.random.seed(42)
+
+    report = {
+        "timestamp": timestamp,
+        "random_seed": 42,
+        "steps": {},
+        "model_performance": {},
+        "data_stats": {},
+    }
+
+    # Step 1: Load matches
+    app.post_message(TrainingProgress(step="Laster data", detail="Laster kamper fra database...", percent=0))
+
+    processor = DataProcessor()
+    try:
+        matches = processor.load_matches()
+    except Exception as e:
+        app.post_message(TrainingError(f"Kunne ikke laste data: {e}"))
+        return
+
+    if len(matches) == 0:
+        app.post_message(TrainingError("Ingen kamper i databasen - last ned data først (Ctrl+D)"))
+        return
+
+    step_elapsed = time.time() - start_time
+    report["steps"]["load_matches"] = {"duration_seconds": step_elapsed, "matches_loaded": len(matches)}
+    report["data_stats"]["total_matches"] = len(matches)
+
+    app.post_message(TrainingProgress(step="Laster data", detail=f"Lastet {len(matches):,} kamper", percent=5))
+
+    if worker.is_cancelled:
+        return
+
+    # Step 2: Generate features
+    app.post_message(TrainingProgress(step="Features", detail="Genererer features...", percent=5))
+
+    step_start = time.time()
+    engineer = FeatureEngineer(matches)
+    total_matches = len(matches)
+
+    def feature_progress(current, total):
+        pct = 5 + int((current / total) * 70)  # 5-75%
+        app.post_message(
+            TrainingProgress(step="Features", detail=f"{current:,}/{total:,} kamper", percent=pct)
+        )
+
+    features_df = engineer.generate_features(min_matches=3, progress_callback=feature_progress)
+
+    step_elapsed = time.time() - step_start
+    report["steps"]["generate_features"] = {
+        "duration_seconds": step_elapsed,
+        "features_generated": len(features_df),
+        "feature_columns": len(features_df.columns),
+    }
+    report["data_stats"]["features_generated"] = len(features_df)
+
+    app.post_message(
+        TrainingProgress(step="Features", detail=f"Genererte {len(features_df):,} feature-rader", percent=75)
+    )
+
+    if worker.is_cancelled:
+        return
+
+    # Step 3: Check minimum data
+    if len(features_df) < 100:
+        app.post_message(
+            TrainingError(f"For lite data for trening ({len(features_df)} rader, trenger minst 100)")
+        )
+        return
+
+    # Save features CSV
+    output_path = processor.db_path.parent / "features.csv"
+    features_df.to_csv(output_path, index=False)
+
+    if worker.is_cancelled:
+        return
+
+    # Step 4: Train models (capture stdout from MatchPredictor.train())
+    app.post_message(TrainingProgress(step="Trening", detail="Trener ML-modeller...", percent=78))
+
+    step_start = time.time()
+    predictor = MatchPredictor()
+
+    progress_writer = _ProgressWriter(app, step="Trening")
+    with contextlib.redirect_stdout(progress_writer):
+        results = predictor.train(features_df)
+
+    step_elapsed = time.time() - step_start
+    report["steps"]["train_models"] = {"duration_seconds": step_elapsed}
+    report["model_performance"] = {
+        "result_1x2": {
+            "accuracy": results["result"]["accuracy"],
+            "log_loss": results["result"]["log_loss"],
+            "classes": results["result"]["classes"],
+        },
+        "over_25": {
+            "accuracy": results["over25"]["accuracy"],
+            "log_loss": results["over25"]["log_loss"],
+        },
+        "btts": {
+            "accuracy": results["btts"]["accuracy"],
+            "log_loss": results["btts"]["log_loss"],
+        },
+    }
+
+    app.post_message(TrainingProgress(step="Trening", detail="Modeller trent", percent=92))
+
+    if worker.is_cancelled:
+        return
+
+    # Step 5: Save models
+    app.post_message(TrainingProgress(step="Lagrer", detail="Lagrer modeller...", percent=93))
+
+    step_start = time.time()
+    model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    versioned_name = f"match_predictor_{model_version}"
+
+    with contextlib.redirect_stdout(io.StringIO()):  # suppress save prints
+        predictor.save()
+        predictor.save(versioned_name)
+
+    step_elapsed = time.time() - step_start
+    report["steps"]["save_models"] = {
+        "duration_seconds": step_elapsed,
+        "model_version": model_version,
+        "model_path": str(predictor.model_dir / "match_predictor.pkl"),
+        "versioned_path": str(predictor.model_dir / f"{versioned_name}.pkl"),
+    }
+
+    # Save training report
+    base_dir = Path(__file__).parent.parent.parent
+    reports_dir = base_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"training_report_{timestamp.replace(':', '-').replace(' ', '_')}.json"
+    filepath = reports_dir / filename
+    with open(filepath, "w") as f:
+        json.dump(report, f, indent=2, default=str)
+
+    latest_path = reports_dir / "latest_training_report.json"
+    with open(latest_path, "w") as f:
+        json.dump(report, f, indent=2, default=str)
+
+    total_elapsed = time.time() - start_time
+    report["total_duration_seconds"] = total_elapsed
+
+    app.post_message(TrainingProgress(step="Ferdig", detail="Trening fullført", percent=100))
+    app.post_message(TrainingFinished(report=report))

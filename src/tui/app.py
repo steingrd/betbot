@@ -22,14 +22,19 @@ from .tasks import (
     DownloadFinished,
     DownloadProgress,
     DownloadResult,
+    TrainingError,
+    TrainingFinished,
+    TrainingProgress,
     build_download_queue,
     enable_wal_mode,
     run_download_task,
+    run_training,
 )
 from .widgets.data_table_view import DataTableView
 from .widgets.event_log import EventLog
 from .widgets.football_spinner import FootballSpinner
 from .widgets.status_bar import StatusBar
+from .widgets.training_view import TrainingView
 
 MIN_WIDTH = 100
 MIN_HEIGHT = 30
@@ -52,6 +57,7 @@ class BetBotApp(App):
     def __init__(self) -> None:
         super().__init__()
         self._download_worker: Worker | None = None
+        self._training_worker: Worker | None = None
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
@@ -66,10 +72,7 @@ class BetBotApp(App):
                     with TabPane("Data", id="tab-data"):
                         yield DataTableView(id="data-view")
                     with TabPane("Trening", id="tab-training"):
-                        yield Static(
-                            "Ingen treningsresultater\n\nTrykk Ctrl+T for å trene modellen",
-                            classes="empty-state",
-                        )
+                        yield TrainingView(id="training-view")
             with Vertical(id="right-panel"):
                 yield EventLog(id="event-log", markup=True)
                 yield FootballSpinner(id="spinner")
@@ -113,6 +116,10 @@ class BetBotApp(App):
     @property
     def _data_view(self) -> DataTableView:
         return self.query_one("#data-view", DataTableView)
+
+    @property
+    def _training_view(self) -> TrainingView:
+        return self.query_one("#training-view", TrainingView)
 
     # --- Download action ---
 
@@ -180,11 +187,19 @@ class BetBotApp(App):
         self.post_message(DownloadFinished(results=results))
 
     def action_cancel_task(self) -> None:
-        """Cancel the running download task."""
+        """Cancel the running download or training task."""
+        cancelled = False
         if self._download_worker is not None and self._download_worker.state == WorkerState.RUNNING:
             self._download_worker.cancel()
             self._event_log.log_warning("Avbryter nedlasting...")
-        else:
+            cancelled = True
+        if self._training_worker is not None and self._training_worker.state == WorkerState.RUNNING:
+            self._training_worker.cancel()
+            self._event_log.log_warning("Avbryter trening...")
+            self._spinner.active = False
+            self._training_worker = None
+            cancelled = True
+        if not cancelled:
             self._event_log.log_info("Ingen aktiv oppgave å avbryte")
 
     # --- Message handlers ---
@@ -226,10 +241,49 @@ class BetBotApp(App):
         self._download_worker = None
         self._event_log.log_error(f"Feil: {message.error}")
 
-    # --- Other actions (stubs for Phase 3/4) ---
+    # --- Training action ---
 
     def action_train_model(self) -> None:
-        self._event_log.log_info("Modelltrening ikke implementert ennå (Phase 3)")
+        if self._training_worker is not None and self._training_worker.state == WorkerState.RUNNING:
+            self._event_log.log_warning("Trening kjører allerede - trykk Escape for å avbryte")
+            return
+        self._event_log.log_info("Starter modelltrening...")
+        self._spinner.active = True
+        self._training_view.set_progress("Starter", "Initialiserer...", 0)
+        # Switch to training tab
+        self.query_one(TabbedContent).active = "tab-training"
+        self._training_worker = self._run_training()
+
+    @work(thread=True)
+    def _run_training(self) -> None:
+        """Background feature engineering + model training."""
+        worker = get_current_worker()
+        run_training(self, worker)
+
+    def on_training_progress(self, message: TrainingProgress) -> None:
+        self._training_view.set_progress(message.step, message.detail, message.percent)
+        self._event_log.log_info(f"[Trening] {message.detail}")
+
+    def on_training_finished(self, message: TrainingFinished) -> None:
+        self._spinner.active = False
+        self._training_worker = None
+        self._training_view.show_report(message.report)
+        self._status_bar._load_initial_values()
+
+        perf = message.report.get("model_performance", {})
+        acc = perf.get("result_1x2", {}).get("accuracy")
+        if acc is not None:
+            self._event_log.log_success(f"Trening ferdig - 1X2 accuracy: {acc:.1%}")
+        else:
+            self._event_log.log_success("Trening ferdig")
+
+    def on_training_error(self, message: TrainingError) -> None:
+        self._spinner.active = False
+        self._training_worker = None
+        self._training_view.set_idle()
+        self._event_log.log_error(f"Treningsfeil: {message.error}")
+
+    # --- Other actions (stubs for Phase 4) ---
 
     def action_run_predictions(self) -> None:
         self._event_log.log_info("Predictions ikke implementert ennå (Phase 4)")
