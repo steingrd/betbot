@@ -22,3 +22,7 @@ seaborn>=0.13.0
 
 # TUI
 textual>=1.0.0
+
+# LLM (optional - chat requires at least one)
+anthropic>=0.40.0
+openai>=1.50.0

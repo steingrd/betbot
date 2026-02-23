@@ -3,7 +3,7 @@
 Screen {
     layout: grid;
     grid-size: 1;
-    grid-rows: 1 1fr 3;
+    grid-rows: 1 1fr auto;
 }
 
 /* Main content area: tabs on left, event log + spinner on right */
@@ -45,16 +45,11 @@ FootballSpinner {
     color: $text-muted;
 }
 
-/* Chat input area at bottom */
-#chat-area {
+/* Chat panel at bottom */
+ChatPanel {
     dock: bottom;
-    height: 3;
+    height: 12;
     border-top: solid $accent;
-    padding: 0 1;
-}
-
-#chat-input {
-    width: 100%;
 }
 
 /* Size warning overlay */

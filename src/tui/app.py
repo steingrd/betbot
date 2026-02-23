@@ -10,7 +10,6 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
     Footer,
-    Input,
     Static,
     TabbedContent,
     TabPane,
@@ -34,6 +33,7 @@ from .tasks import (
     run_predictions,
     run_training,
 )
+from .widgets.chat_panel import ChatPanel
 from .widgets.data_table_view import DataTableView
 from .widgets.event_log import EventLog
 from .widgets.football_spinner import FootballSpinner
@@ -79,11 +79,7 @@ class BetBotApp(App):
             with Vertical(id="right-panel"):
                 yield EventLog(id="event-log", markup=True)
                 yield FootballSpinner(id="spinner")
-        with Horizontal(id="chat-area"):
-            yield Input(
-                placeholder="Skriv en melding til BetBot...",
-                id="chat-input",
-            )
+        yield ChatPanel(id="chat-panel")
         yield Static(
             "Terminal for liten (minimum 100x30)",
             id="size-warning",
@@ -127,6 +123,10 @@ class BetBotApp(App):
     @property
     def _predictions_view(self) -> PredictionsView:
         return self.query_one("#predictions-view", PredictionsView)
+
+    @property
+    def _chat_panel(self) -> ChatPanel:
+        return self.query_one("#chat-panel", ChatPanel)
 
     # --- Download action ---
 
@@ -329,6 +329,8 @@ class BetBotApp(App):
             self._event_log.log_success(
                 f"Fant {len(message.picks)} value bets fra {message.match_count} kamper"
             )
+            # Auto-trigger LLM analysis
+            self._chat_panel.send_auto_analysis(message.picks)
         else:
             self._event_log.log_info(
                 f"Ingen value bets funnet ({message.match_count} kamper analysert)"
@@ -343,4 +345,5 @@ class BetBotApp(App):
 
     def action_quit_app(self) -> None:
         self._event_log.log_info("Avslutter BetBot...")
+        self._chat_panel.cleanup()
         self.exit()
