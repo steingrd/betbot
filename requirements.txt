@@ -19,3 +19,6 @@ schedule>=1.2.0
 # Analysis
 matplotlib>=3.8.0
 seaborn>=0.13.0
+
+# TUI
+textual>=1.0.0
