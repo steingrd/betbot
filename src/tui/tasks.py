@@ -222,6 +222,102 @@ class TrainingError(Message):
         super().__init__()
 
 
+# --- Prediction Messages ---
+
+
+class PredictionProgress(Message):
+    """Posted from worker thread to update UI on prediction progress."""
+
+    def __init__(self, step: str, detail: str) -> None:
+        self.step = step
+        self.detail = detail
+        super().__init__()
+
+
+class PredictionFinished(Message):
+    """Posted when predictions are complete."""
+
+    def __init__(self, picks: list, match_count: int, stale_warning: str | None = None) -> None:
+        self.picks = picks
+        self.match_count = match_count
+        self.stale_warning = stale_warning
+        super().__init__()
+
+
+class PredictionError(Message):
+    """Posted when predictions fail fatally."""
+
+    def __init__(self, error: str) -> None:
+        self.error = error
+        super().__init__()
+
+
+def run_predictions(app, worker) -> None:
+    """Run prediction pipeline in a worker thread.
+
+    Loads model, fetches NT matches, computes features, predicts, finds value bets.
+
+    Args:
+        app: The BetBotApp instance (for posting messages)
+        worker: The current worker (for cancellation checks)
+    """
+    app.post_message(PredictionProgress(step="Laster modell", detail="Laster ML-modell og historisk data..."))
+
+    try:
+        from src.predictions.daily_picks import DailyPicksFinder
+
+        finder = DailyPicksFinder()
+        finder.load_model()
+    except Exception as e:
+        app.post_message(PredictionError(f"Kunne ikke laste modell: {e}"))
+        return
+
+    match_count = len(finder.matches_df) if finder.matches_df is not None else 0
+    app.post_message(PredictionProgress(step="Laster modell", detail=f"Modell lastet ({match_count:,} kamper)"))
+
+    if worker.is_cancelled:
+        return
+
+    # Check for stale data
+    stale_warning = None
+    if finder.matches_df is not None and len(finder.matches_df) > 0:
+        latest_unix = finder.matches_df["date_unix"].max()
+        days_old = (time.time() - latest_unix) / 86400
+        if days_old > 30:
+            stale_warning = f"Data er {int(days_old)} dager gammel - kjor Ctrl+D for a oppdatere"
+
+    # Fetch upcoming matches from Norsk Tipping
+    app.post_message(PredictionProgress(step="Henter kamper", detail="Henter kamper fra Norsk Tipping..."))
+
+    try:
+        matches = finder.get_upcoming_matches()
+    except Exception as e:
+        app.post_message(PredictionError(f"Kunne ikke hente kamper: {e}"))
+        return
+
+    if not matches:
+        app.post_message(PredictionFinished(picks=[], match_count=0, stale_warning=stale_warning))
+        return
+
+    app.post_message(
+        PredictionProgress(step="Henter kamper", detail=f"Fant {len(matches)} kamper fra Norsk Tipping")
+    )
+
+    if worker.is_cancelled:
+        return
+
+    # Find value bets
+    app.post_message(PredictionProgress(step="Analyserer", detail=f"Analyserer {len(matches)} kamper..."))
+
+    try:
+        picks = finder.find_value_bets(matches)
+    except Exception as e:
+        app.post_message(PredictionError(f"Feil under analyse: {e}"))
+        return
+
+    app.post_message(PredictionFinished(picks=picks, match_count=len(matches), stale_warning=stale_warning))
+
+
 class _ProgressWriter(io.TextIOBase):
     """StringIO replacement that posts TrainingProgress for each line written by print()."""
 

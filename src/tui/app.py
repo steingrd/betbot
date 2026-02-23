@@ -22,17 +22,22 @@ from .tasks import (
     DownloadFinished,
     DownloadProgress,
     DownloadResult,
+    PredictionError,
+    PredictionFinished,
+    PredictionProgress,
     TrainingError,
     TrainingFinished,
     TrainingProgress,
     build_download_queue,
     enable_wal_mode,
     run_download_task,
+    run_predictions,
     run_training,
 )
 from .widgets.data_table_view import DataTableView
 from .widgets.event_log import EventLog
 from .widgets.football_spinner import FootballSpinner
+from .widgets.predictions_view import PredictionsView
 from .widgets.status_bar import StatusBar
 from .widgets.training_view import TrainingView
 
@@ -58,6 +63,7 @@ class BetBotApp(App):
         super().__init__()
         self._download_worker: Worker | None = None
         self._training_worker: Worker | None = None
+        self._prediction_worker: Worker | None = None
 
     def compose(self) -> ComposeResult:
         yield StatusBar()
@@ -65,10 +71,7 @@ class BetBotApp(App):
             with Vertical(id="tab-area"):
                 with TabbedContent(id="tabs"):
                     with TabPane("Predictions", id="tab-predictions"):
-                        yield Static(
-                            "Ingen predictions ennå\n\nTrykk Ctrl+P for å kjøre predictions\neller Ctrl+D for å laste ned data først",
-                            classes="empty-state",
-                        )
+                        yield PredictionsView(id="predictions-view")
                     with TabPane("Data", id="tab-data"):
                         yield DataTableView(id="data-view")
                     with TabPane("Trening", id="tab-training"):
@@ -120,6 +123,10 @@ class BetBotApp(App):
     @property
     def _training_view(self) -> TrainingView:
         return self.query_one("#training-view", TrainingView)
+
+    @property
+    def _predictions_view(self) -> PredictionsView:
+        return self.query_one("#predictions-view", PredictionsView)
 
     # --- Download action ---
 
@@ -187,7 +194,7 @@ class BetBotApp(App):
         self.post_message(DownloadFinished(results=results))
 
     def action_cancel_task(self) -> None:
-        """Cancel the running download or training task."""
+        """Cancel the running download, training, or prediction task."""
         cancelled = False
         if self._download_worker is not None and self._download_worker.state == WorkerState.RUNNING:
             self._download_worker.cancel()
@@ -198,6 +205,12 @@ class BetBotApp(App):
             self._event_log.log_warning("Avbryter trening...")
             self._spinner.active = False
             self._training_worker = None
+            cancelled = True
+        if self._prediction_worker is not None and self._prediction_worker.state == WorkerState.RUNNING:
+            self._prediction_worker.cancel()
+            self._event_log.log_warning("Avbryter predictions...")
+            self._spinner.active = False
+            self._prediction_worker = None
             cancelled = True
         if not cancelled:
             self._event_log.log_info("Ingen aktiv oppgave å avbryte")
@@ -277,16 +290,56 @@ class BetBotApp(App):
         else:
             self._event_log.log_success("Trening ferdig")
 
+        # Auto-trigger predictions after training
+        self._event_log.log_info("Kjorer predictions med ny modell...")
+        self.action_run_predictions()
+
     def on_training_error(self, message: TrainingError) -> None:
         self._spinner.active = False
         self._training_worker = None
         self._training_view.set_idle()
         self._event_log.log_error(f"Treningsfeil: {message.error}")
 
-    # --- Other actions (stubs for Phase 4) ---
+    # --- Prediction action ---
 
     def action_run_predictions(self) -> None:
-        self._event_log.log_info("Predictions ikke implementert ennå (Phase 4)")
+        if self._prediction_worker is not None and self._prediction_worker.state == WorkerState.RUNNING:
+            self._event_log.log_warning("Predictions kjorer allerede - trykk Escape for a avbryte")
+            return
+        self._event_log.log_info("Starter predictions...")
+        self._spinner.active = True
+        self.query_one(TabbedContent).active = "tab-predictions"
+        self._prediction_worker = self._run_predictions()
+
+    @work(thread=True)
+    def _run_predictions(self) -> None:
+        """Background prediction pipeline."""
+        worker = get_current_worker()
+        run_predictions(self, worker)
+
+    def on_prediction_progress(self, message: PredictionProgress) -> None:
+        self._event_log.log_info(f"[Predictions] {message.detail}")
+
+    def on_prediction_finished(self, message: PredictionFinished) -> None:
+        self._spinner.active = False
+        self._prediction_worker = None
+        self._predictions_view.show_picks(message.picks, message.stale_warning)
+
+        if message.picks:
+            self._event_log.log_success(
+                f"Fant {len(message.picks)} value bets fra {message.match_count} kamper"
+            )
+        else:
+            self._event_log.log_info(
+                f"Ingen value bets funnet ({message.match_count} kamper analysert)"
+            )
+
+    def on_prediction_error(self, message: PredictionError) -> None:
+        self._spinner.active = False
+        self._prediction_worker = None
+        self._event_log.log_error(f"Predictionsfeil: {message.error}")
+
+    # --- Other actions ---
 
     def action_quit_app(self) -> None:
         self._event_log.log_info("Avslutter BetBot...")
