@@ -97,6 +97,11 @@ class BetBotApp(App):
     def _chat_panel(self) -> ChatPanel:
         return self.query_one("#chat-panel", ChatPanel)
 
+    # --- Chat lifecycle ---
+
+    def on_chat_panel_chat_ready(self, _message: ChatPanel.ChatReady) -> None:
+        self._chat_panel.show_welcome_message()
+
     # --- Command routing from ChatPanel ---
 
     def on_chat_panel_command_requested(self, message: ChatPanel.CommandRequested) -> None:

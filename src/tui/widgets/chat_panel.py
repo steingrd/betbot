@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
 from textual import work
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
@@ -112,6 +116,84 @@ class ChatPanel(Widget):
                     self._add_assistant_bubble(msg.content)
 
         self.post_message(self.ChatReady())
+
+    def show_welcome_message(self) -> None:
+        """Show a welcome message with auto-detected system state."""
+        base_dir = Path(__file__).parent.parent.parent.parent
+        db_path = base_dir / "data" / "processed" / "betbot.db"
+        report_path = base_dir / "reports" / "latest_training_report.json"
+        model_dir = base_dir / "models"
+
+        # Check data state
+        match_count = 0
+        league_count = 0
+        latest_date = None
+
+        if db_path.exists():
+            try:
+                conn = sqlite3.connect(str(db_path))
+
+                row = conn.execute("SELECT COUNT(*) FROM matches").fetchone()
+                if row and row[0]:
+                    match_count = row[0]
+
+                row = conn.execute(
+                    "SELECT COUNT(DISTINCT league_id) FROM matches"
+                ).fetchone()
+                if row and row[0]:
+                    league_count = row[0]
+
+                row = conn.execute("SELECT MAX(date_unix) FROM matches").fetchone()
+                if row and row[0]:
+                    latest_date = datetime.fromtimestamp(row[0])
+
+                conn.close()
+            except Exception:
+                pass
+
+        has_data = match_count > 0
+
+        # Check model state
+        model_path = model_dir / "match_predictor.pkl"
+        has_model = model_path.exists()
+
+        # Check data staleness
+        stale_days = None
+        if latest_date:
+            stale_days = (datetime.now() - latest_date).days
+
+        # Build welcome message
+        lines = ["Velkommen til BetBot!", ""]
+
+        if not has_data:
+            lines.append(
+                "Ingen data funnet. Bruk /download for aa laste ned kampdata fra FootyStats."
+            )
+        elif stale_days is not None and stale_days > 30:
+            lines.append(
+                f"Data er {stale_days} dager gammel "
+                f"(siste: {latest_date.strftime('%Y-%m-%d')})."
+            )
+            lines.append("Bruk /download for aa oppdatere.")
+            if not has_model:
+                lines.append("Ingen modell funnet. Bruk /train etter oppdatering.")
+        elif not has_model:
+            lines.append(
+                f"Data: {match_count:,} kamper fra {league_count} ligaer "
+                f"(siste: {latest_date.strftime('%Y-%m-%d')})."
+            )
+            lines.append("Ingen modell funnet. Bruk /train for aa trene ML-modeller.")
+        else:
+            lines.append(
+                f"Data: {match_count:,} kamper fra {league_count} ligaer "
+                f"(siste: {latest_date.strftime('%Y-%m-%d')})."
+            )
+            lines.append("Modell klar. Bruk /predict for aa finne value bets.")
+
+        lines.append("")
+        lines.append("Skriv /help for alle kommandoer.")
+
+        self._add_system_message("\n".join(lines))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id != "chat-input":
