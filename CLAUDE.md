@@ -18,6 +18,7 @@ betbot/
 │   ├── raw/api_cache/     # Cached API-responses
 │   └── processed/
 │       ├── betbot.db      # SQLite database med kampdata
+│       ├── chat.db        # SQLite database for chat-historikk
 │       └── features.csv   # Genererte features
 ├── models/
 │   ├── match_predictor.pkl           # Trent XGBoost-modell (current)
@@ -34,15 +35,38 @@ betbot/
 │   │   └── feature_engineering.py  # Feature-generering
 │   ├── models/
 │   │   └── match_predictor.py      # ML-modeller (XGBoost)
-│   └── analysis/
-│       └── value_finder.py         # Value bet detection
+│   ├── analysis/
+│   │   └── value_finder.py         # Value bet detection
+│   ├── predictions/
+│   │   └── daily_picks.py          # DailyPicksFinder for value bets
+│   ├── tui/                        # Textual TUI dashboard
+│   │   ├── app.py                  # BetBotApp - hovedapplikasjon
+│   │   ├── tasks.py                # Bakgrunnsjobber og meldinger
+│   │   ├── styles/app.tcss         # Textual CSS layout
+│   │   └── widgets/                # UI-komponenter
+│   │       ├── chat_panel.py       # LLM-chat med streaming
+│   │       ├── data_table_view.py  # Dataoversikt per liga
+│   │       ├── event_log.py        # Hendelseslogg
+│   │       ├── football_spinner.py # ASCII-animasjon
+│   │       ├── predictions_view.py # Value bet-tabell
+│   │       ├── status_bar.py       # Statuslinje (data, modell, accuracy)
+│   │       └── training_view.py    # Treningsprogress og rapport
+│   └── chat/                       # LLM-integrasjon
+│       ├── llm_provider.py         # ChatMessage og LLMProvider-protokoll
+│       ├── history.py              # SQLite chat-historikk
+│       ├── system_prompt.py        # Dynamisk systemprompt
+│       └── providers/
+│           ├── __init__.py         # Provider-factory
+│           ├── anthropic_provider.py # Claude-integrasjon
+│           └── openai_provider.py  # OpenAI-integrasjon
 └── scripts/
     ├── test_api.py                 # Test FootyStats API
     ├── download_all_leagues.py     # Last ned alle valgte ligaer
     ├── train_model.py              # Tren modeller med progress
     ├── run_backtest.py             # Kjør backtest
-    ├── daily_picks.py              # Finn value bets
-    └── get_todays_odds.py          # Hent odds fra Norsk Tipping
+    ├── daily_picks.py              # Finn value bets (CLI)
+    ├── get_todays_odds.py          # Hent odds fra Norsk Tipping
+    └── run_tui.py                  # Start TUI dashboard
 ```
 
 ## Konvensjoner
@@ -60,10 +84,17 @@ betbot/
 
 ### Miljø
 - Virtual environment: `.venv/`
-- API-nøkler i `.env` (FOOTYSTATS_API_KEY)
+- API-nøkler i `.env` (FOOTYSTATS_API_KEY, og valgfritt ANTHROPIC_API_KEY / OPENAI_API_KEY for chat)
 - Aldri commit `.env` eller `data/` innhold
 
 ## Vanlige oppgaver
+
+### Start TUI dashboard (anbefalt)
+```bash
+source .venv/bin/activate
+python scripts/run_tui.py
+```
+Tastatursnarveier: `Ctrl+D` last ned data, `Ctrl+T` tren modell, `Ctrl+P` kjør predictions, `Escape` avbryt, `Ctrl+Q` avslutt.
 
 ### Last ned data
 ```bash
@@ -101,6 +132,7 @@ python scripts/train_model.py
 
 1. **FootyStats cache**: Etter å velge ligaer må man vente 30 min før data er tilgjengelig.
 2. **Norsk Tipping**: Bruker Tipping-kuponger (sannsynligheter), ikke faktiske bookmakerodds.
+3. **TUI terminal-størrelse**: Krever minimum 100x30 tegn. Viser advarsel hvis terminalen er for liten.
 
 ## Sesong-håndtering
 
@@ -110,6 +142,22 @@ Systemet støtter både kalenderår-sesonger (Norge) og Aug-Mai sesonger (Premie
 - **Ingen måned-heuristikk**: Bruker `season_id` og faktiske kampdatoer fra FootyStats
 - **Automatisk sesong-label**: "2024" for kalenderår, "2024/2025" for Aug-Mai
 - **Leakage-verifisering**: Sjekker at max(train_date) < min(test_date) per liga
+
+## TUI-arkitektur
+
+TUI-dashboardet er bygget med [Textual](https://textual.textualize.io/) og har følgende struktur:
+
+- **BetBotApp** (`src/tui/app.py`) — Hovedapp med layout, keybindings, og worker-håndtering
+- **tasks.py** — Bakgrunnsjobber (download, training, predictions) kjøres i Textual workers med thread=True
+- **Widgets** — Selvstendige UI-komponenter med egen CSS og tilstand
+- **ChatPanel** — LLM-integrasjon med async streaming, støtter Anthropic og OpenAI
+- **Meldingssystem** — Worker-tråder kommuniserer med UI via `post_message()` (Textual Messages)
+
+### Konvensjoner for TUI-kode
+- Bakgrunnsjobber bruker `@work(thread=True)` og poster Messages til UI
+- Ingen direkte UI-kall fra worker-tråder — bruk `post_message()` eller `call_from_thread()`
+- Widgets har `DEFAULT_CSS` inline + felles layout i `styles/app.tcss`
+- LLM-providers bruker factory pattern (`src/chat/providers/__init__.py`)
 
 ## Viktig ved endringer
 

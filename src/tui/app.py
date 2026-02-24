@@ -199,11 +199,14 @@ class BetBotApp(App):
         if self._download_worker is not None and self._download_worker.state == WorkerState.RUNNING:
             self._download_worker.cancel()
             self._event_log.log_warning("Avbryter nedlasting...")
+            self._spinner.active = False
+            self._download_worker = None
             cancelled = True
         if self._training_worker is not None and self._training_worker.state == WorkerState.RUNNING:
             self._training_worker.cancel()
             self._event_log.log_warning("Avbryter trening...")
             self._spinner.active = False
+            self._training_view.set_idle()
             self._training_worker = None
             cancelled = True
         if self._prediction_worker is not None and self._prediction_worker.state == WorkerState.RUNNING:
