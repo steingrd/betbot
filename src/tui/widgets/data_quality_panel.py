@@ -79,9 +79,10 @@ class DataQualityPanel(Widget):
                 if row and row[0]:
                     data_date = datetime.fromtimestamp(row[0]).strftime("%Y-%m-%d")
 
-                # Distinct league count
+                # Distinct league count via seasons table
                 row = conn.execute(
-                    "SELECT COUNT(DISTINCT league_id) FROM matches"
+                    "SELECT COUNT(DISTINCT s.league_name)"
+                    " FROM matches m JOIN seasons s ON m.season_id = s.id"
                 ).fetchone()
                 if row and row[0]:
                     league_count = str(row[0])

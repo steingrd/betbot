@@ -138,7 +138,8 @@ class ChatPanel(Widget):
                     match_count = row[0]
 
                 row = conn.execute(
-                    "SELECT COUNT(DISTINCT league_id) FROM matches"
+                    "SELECT COUNT(DISTINCT s.league_name)"
+                    " FROM matches m JOIN seasons s ON m.season_id = s.id"
                 ).fetchone()
                 if row and row[0]:
                     league_count = row[0]
