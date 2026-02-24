@@ -287,9 +287,21 @@ class DataProcessor:
         return pd.DataFrame(records)
 
     def save_matches(self, df: pd.DataFrame):
-        """Save matches DataFrame to database"""
+        """Save matches DataFrame to database using upsert (INSERT OR REPLACE)."""
+        if df.empty:
+            return
         conn = self._get_connection()
-        df.to_sql("matches", conn, if_exists="append", index=False)
+        columns = list(df.columns)
+        placeholders = ", ".join(["?"] * len(columns))
+        col_names = ", ".join(columns)
+        sql = f"INSERT OR REPLACE INTO matches ({col_names}) VALUES ({placeholders})"
+        # Convert NaN to None for proper SQL NULL handling
+        records = [
+            tuple(None if pd.isna(v) else v for v in row)
+            for row in df.itertuples(index=False, name=None)
+        ]
+        conn.executemany(sql, records)
+        conn.commit()
         conn.close()
 
     def load_matches(self, season_id: Optional[int] = None) -> pd.DataFrame:

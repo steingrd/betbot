@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+import sqlite3
+from datetime import datetime
+from pathlib import Path
 
 from textual import work
 from textual.app import App, ComposeResult
@@ -33,7 +36,7 @@ from .widgets.chat_panel import ChatPanel
 from .widgets.data_quality_panel import DataQualityPanel
 from .widgets.event_log import EventLog
 
-MIN_WIDTH = 100
+MIN_WIDTH = 116
 MIN_HEIGHT = 30
 
 
@@ -62,7 +65,7 @@ class BetBotApp(App):
                 yield ActivityPanel(id="activity-panel")
                 yield EventLog(id="event-log", markup=True)
         yield Static(
-            "Terminal for liten (minimum 100x30)",
+            "Terminal for liten (minimum 116x30)",
             id="size-warning",
         )
         yield Footer()
@@ -111,9 +114,44 @@ class BetBotApp(App):
             self._start_training()
         elif message.command == "predict":
             self._start_predictions()
+        elif message.command == "results":
+            self._show_results()
         elif message.command == "status":
             self._data_quality.refresh_data()
             self._event_log.log_info("Status oppdatert")
+
+    # --- Results ---
+
+    def _show_results(self) -> None:
+        """Show recent match results from the database."""
+        base_dir = Path(__file__).parent.parent.parent
+        db_path = base_dir / "data" / "processed" / "betbot.db"
+
+        if not db_path.exists():
+            self._chat_panel.render_system_message("Ingen database funnet. Kjor /download forst.")
+            return
+
+        try:
+            conn = sqlite3.connect(str(db_path))
+            rows = conn.execute("""
+                SELECT m.date_unix, s.country, s.league_name,
+                       m.home_team, m.home_goals, m.away_goals, m.away_team
+                FROM matches m
+                LEFT JOIN seasons s ON m.season_id = s.id
+                WHERE m.home_shots IS NOT NULL
+                ORDER BY m.date_unix DESC
+                LIMIT 20
+            """).fetchall()
+            conn.close()
+        except Exception as e:
+            self._chat_panel.render_system_message(f"Feil ved henting av resultater: {e}")
+            return
+
+        if not rows:
+            self._chat_panel.render_system_message("Ingen ferdigspilte kamper funnet.")
+            return
+
+        self._chat_panel.render_results_inline(rows)
 
     # --- Download ---
 
@@ -242,8 +280,6 @@ class BetBotApp(App):
 
         if r.error:
             self._event_log.log_error(f"{progress} {label}: {r.error}")
-        elif r.skipped:
-            self._event_log.log_info(f"{progress} {label}: allerede i DB ({r.match_count})")
         elif r.match_count == 0:
             self._event_log.log_warning(f"{progress} {label}: ingen kamper")
         else:
@@ -256,14 +292,13 @@ class BetBotApp(App):
         self._download_worker = None
 
         total = len(message.results)
-        ok = sum(1 for r in message.results if r.ok and not r.skipped)
-        skipped = sum(1 for r in message.results if r.skipped)
+        ok = sum(1 for r in message.results if r.ok)
         failed = sum(1 for r in message.results if r.error)
-        matches = sum(r.match_count for r in message.results if r.ok and not r.skipped)
+        matches = sum(r.match_count for r in message.results if r.ok)
 
-        summary = f"Nedlasting ferdig: {ok} nye sesonger, {skipped} allerede i DB, {failed} feil, {matches} kamper lastet ned"
+        summary = f"Nedlasting ferdig: {ok} sesonger, {failed} feil, {matches} kamper lastet ned"
         self._event_log.log_success(
-            f"Ferdig: {ok} nye, {skipped} i DB, {failed} feil, {matches} kamper"
+            f"Ferdig: {ok} sesonger, {failed} feil, {matches} kamper"
         )
         self._chat_panel.render_system_message(summary)
 

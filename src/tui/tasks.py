@@ -142,10 +142,27 @@ def build_download_queue(client) -> list[DownloadTask]:
     return tasks
 
 
+def _is_active_season(processor, season_id: int) -> bool:
+    """Check if a season is still active (end_date in the future or NULL)."""
+    import sqlite3
+
+    conn = sqlite3.connect(str(processor.db_path))
+    row = conn.execute(
+        "SELECT end_date FROM seasons WHERE id = ?", (season_id,)
+    ).fetchone()
+    conn.close()
+
+    if row is None or row[0] is None:
+        return True  # Unknown or no end date -> treat as active
+    return row[0] > time.time()
+
+
 def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
     """Download and process a single season. Returns a DownloadResult.
 
     This runs in a worker thread - no UI calls here.
+    Uses upsert so existing matches get updated with new results.
+    Bypasses cache for active seasons to pick up completed matches.
     """
     try:
         # Save season metadata
@@ -158,17 +175,12 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
             season_label=f"{task.country} {task.league_name} {task.year}",
         )
 
-        # Check if already in DB
-        existing = processor.load_matches(task.season_id)
-        if len(existing) > 0:
-            # Update season dates from existing data
-            start_date = int(existing["date_unix"].min())
-            end_date = int(existing["date_unix"].max())
-            processor.update_season_dates(task.season_id, start_date, end_date)
-            return DownloadResult(task=task, match_count=len(existing), skipped=True)
+        # For active seasons, bypass cache to get fresh data
+        active = _is_active_season(processor, task.season_id)
+        use_cache = not active
 
         # Download matches
-        response = client.get_league_matches(task.season_id)
+        response = client.get_league_matches(task.season_id, use_cache=use_cache)
         if isinstance(response, dict) and "data" in response:
             matches = response["data"]
         else:
@@ -177,7 +189,7 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
         if not matches:
             return DownloadResult(task=task, match_count=0)
 
-        # Process and save
+        # Process and save (upsert updates existing matches)
         df = processor.process_matches(matches, task.season_id, league_id=task.league_id)
         processor.save_matches(df)
 
