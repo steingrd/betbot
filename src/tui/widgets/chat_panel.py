@@ -9,6 +9,8 @@ from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Input, Markdown, Static
 
+from src.tui.commands import COMMANDS, parse_command
+
 
 class ChatPanel(Widget):
     """Chat panel with input, message history, and LLM streaming."""
@@ -39,6 +41,10 @@ class ChatPanel(Widget):
         content-align: center middle;
         margin: 1 0;
     }
+    ChatPanel .chat-system {
+        color: $text-muted;
+        margin: 0 0 0 2;
+    }
     ChatPanel #chat-input {
         dock: bottom;
         margin: 0;
@@ -55,6 +61,14 @@ class ChatPanel(Widget):
     class ChatReady(Message):
         """Posted when the chat panel is initialized and ready."""
 
+    class CommandRequested(Message):
+        """Posted when a slash command should be handled by the app."""
+
+        def __init__(self, command: str, args: str) -> None:
+            self.command = command
+            self.args = args
+            super().__init__()
+
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._provider = None
@@ -67,7 +81,7 @@ class ChatPanel(Widget):
     def compose(self) -> ComposeResult:
         yield VerticalScroll(id="chat-messages")
         yield Input(
-            placeholder="Skriv en melding til BetBot...",
+            placeholder="Skriv melding eller /kommando...",
             id="chat-input",
         )
 
@@ -109,8 +123,10 @@ class ChatPanel(Widget):
 
         event.input.value = ""
 
-        if text == "/clear":
-            self._clear_chat()
+        # Check for slash commands before LLM flow
+        cmd = parse_command(text)
+        if cmd is not None:
+            self._handle_command(cmd)
             return
 
         if self._streaming:
@@ -123,6 +139,94 @@ class ChatPanel(Widget):
         self._add_user_bubble(text)
         self._save_message("user", text)
         self._stream_response(text)
+
+    def _handle_command(self, cmd) -> None:
+        """Route a parsed ChatCommand to the appropriate handler."""
+        if cmd.name == "clear":
+            self._clear_chat()
+        elif cmd.name == "help":
+            self._show_help()
+        elif cmd.name in ("download", "train", "predict", "status"):
+            self._add_user_bubble(f"/{cmd.name}" + (f" {cmd.args}" if cmd.args else ""))
+            self.post_message(self.CommandRequested(cmd.name, cmd.args))
+        elif cmd.name in COMMANDS:
+            # Any other known command that might be added later
+            self._add_user_bubble(f"/{cmd.name}" + (f" {cmd.args}" if cmd.args else ""))
+            self.post_message(self.CommandRequested(cmd.name, cmd.args))
+        else:
+            self._add_user_bubble(f"/{cmd.name}" + (f" {cmd.args}" if cmd.args else ""))
+            self._add_error(f"Ukjent kommando: /{cmd.name}. Skriv /help for kommandoer.")
+
+    def _show_help(self) -> None:
+        """Render the help text inline as a system message."""
+        self._add_user_bubble("/help")
+        lines = ["Tilgjengelige kommandoer:", ""]
+        for name, description in COMMANDS.items():
+            lines.append(f"  /{name} - {description}")
+        help_text = "\n".join(lines)
+        self._add_system_message(help_text)
+
+    def render_predictions_inline(self, picks: list[dict], stale_warning: str | None = None) -> None:
+        """Render prediction results as a Markdown table inline in chat."""
+        if stale_warning:
+            self._add_system_message(f"⚠ {stale_warning}")
+
+        if not picks:
+            self._add_system_message("Ingen value bets funnet.")
+            return
+
+        lines = ["**Value Bets**", ""]
+        lines.append("| Kamp | Market | Edge | Konf. |")
+        lines.append("|------|--------|------|-------|")
+        for p in picks:
+            home = p.get("home_team", "?")
+            away = p.get("away_team", "?")
+            market = p.get("market", "?")
+            edge = p.get("edge")
+            edge_str = f"{edge:.1%}" if edge is not None else "-"
+            conf = p.get("confidence", "-")
+            lines.append(f"| {home} - {away} | {market} | {edge_str} | {conf} |")
+
+        md = "\n".join(lines)
+        container = self.query_one("#chat-messages", VerticalScroll)
+        widget = Markdown(md, classes="chat-assistant")
+        container.mount(widget)
+        container.scroll_end(animate=False)
+
+    def render_training_report_inline(self, report: dict) -> None:
+        """Render training report as a Markdown table inline in chat."""
+        perf = report.get("model_performance", {})
+        data = report.get("data_stats", {})
+        duration = report.get("total_duration_seconds")
+
+        lines = ["**Treningsrapport**", ""]
+
+        total = data.get("total_matches", "?")
+        features = data.get("features_generated", "?")
+        lines.append(f"Kamper: {total:,} | Features: {features:,}")
+        if duration is not None:
+            lines.append(f"Tid: {duration:.0f}s")
+        lines.append("")
+
+        lines.append("| Modell | Accuracy | Log Loss |")
+        lines.append("|--------|----------|----------|")
+        for key, label in [("result_1x2", "1X2"), ("over_25", "Over 2.5"), ("btts", "BTTS")]:
+            m = perf.get(key, {})
+            acc = m.get("accuracy")
+            ll = m.get("log_loss")
+            acc_str = f"{acc:.1%}" if acc is not None else "-"
+            ll_str = f"{ll:.4f}" if ll is not None else "-"
+            lines.append(f"| {label} | {acc_str} | {ll_str} |")
+
+        md = "\n".join(lines)
+        container = self.query_one("#chat-messages", VerticalScroll)
+        widget = Markdown(md, classes="chat-assistant")
+        container.mount(widget)
+        container.scroll_end(animate=False)
+
+    def render_system_message(self, text: str) -> None:
+        """Render a system message inline in chat (public API for app)."""
+        self._add_system_message(text)
 
     def send_auto_analysis(self, predictions: list[dict]) -> None:
         """Trigger automatic analysis of predictions."""
@@ -210,6 +314,12 @@ class ChatPanel(Widget):
     def _add_info(self, text: str) -> None:
         container = self.query_one("#chat-messages", VerticalScroll)
         widget = Static(text, classes="chat-info")
+        container.mount(widget)
+        container.scroll_end(animate=False)
+
+    def _add_system_message(self, text: str) -> None:
+        container = self.query_one("#chat-messages", VerticalScroll)
+        widget = Static(text, classes="chat-system")
         container.mount(widget)
         container.scroll_end(animate=False)
 

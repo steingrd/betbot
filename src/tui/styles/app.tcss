@@ -1,55 +1,41 @@
-/* BetBot TUI Layout */
+/* BetBot TUI Layout - Chat-first single-screen */
 
 Screen {
-    layout: grid;
-    grid-size: 1;
-    grid-rows: 1 1fr auto;
+    layout: vertical;
 }
 
-/* Main content area: tabs on left, event log + spinner on right */
+/* Main content: chat on left, panels on right */
 #main-content {
     layout: horizontal;
+    height: 1fr;
 }
 
-#tab-area {
+/* Chat panel fills left side */
+ChatPanel {
     width: 1fr;
 }
 
+/* Right panel: stacked data quality, activity, event log */
 #right-panel {
     layout: vertical;
-    width: 30;
+    width: 32;
     border-left: solid $accent;
 }
 
+DataQualityPanel {
+    border-bottom: solid $accent;
+}
+
+ActivityPanel {
+    border-bottom: solid $accent;
+}
+
 EventLog {
-    /* Override dock since we're in a vertical container */
     dock: none;
     width: 100%;
     height: 1fr;
     border-left: none;
     padding: 0 1;
-}
-
-FootballSpinner {
-    width: 100%;
-    height: 6;
-    border-top: solid $accent;
-    content-align: center middle;
-}
-
-/* Tab content empty states */
-.empty-state {
-    width: 100%;
-    height: 100%;
-    content-align: center middle;
-    color: $text-muted;
-}
-
-/* Chat panel at bottom */
-ChatPanel {
-    dock: bottom;
-    height: 12;
-    border-top: solid $accent;
 }
 
 /* Size warning overlay */
