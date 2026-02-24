@@ -516,30 +516,38 @@ BetBot har et Textual-basert TUI-dashboard (`python scripts/run_tui.py`) som gir
 
 ### Layout
 
+Chat-first single-screen layout:
+
 ```
-┌─────────────────────────────────────────┐
-│         StatusBar (data, modell, acc)    │
-├────────────────────────────┬────────────┤
-│  Tabbed Content            │  EventLog  │
-│  [Predictions|Data|Trening]│  (28w)     │
-│                            ├────────────┤
-│                            │  Spinner   │
-├────────────────────────────┴────────────┤
-│  ChatPanel (LLM-chat med streaming)     │
-├─────────────────────────────────────────┤
-│  Footer (tastatursnarveier)             │
+┌──────────────────────────┬──────────────┐
+│  ChatPanel               │ DataQuality  │
+│  (LLM-chat, inline       │ Panel        │
+│   results, /commands,     ├──────────────┤
+│   welcome message)        │ Activity     │
+│                           │ Panel        │
+│                           ├──────────────┤
+│                           │ EventLog     │
+├──────────────────────────┴──────────────┤
+│  Footer                                 │
 └─────────────────────────────────────────┘
 ```
 
-### Tastatursnarveier
+### Chat-kommandoer
 
-| Snarvei | Handling |
-|---------|----------|
-| Ctrl+D | Last ned data fra FootyStats |
-| Ctrl+T | Tren ML-modeller |
-| Ctrl+P | Kjor predictions (value bets) |
+Alle handlinger utfores via `/kommandoer` i chatten:
+
+| Kommando | Handling |
+|----------|----------|
+| /download | Last ned data fra FootyStats |
+| /train | Tren ML-modeller |
+| /predict | Finn value bets |
+| /status | Oppdater datakvalitet-panelet |
+| /help | Vis tilgjengelige kommandoer |
+| /clear | Nullstill chat-historikk |
 | Escape | Avbryt pagaende oppgave |
 | Ctrl+Q | Avslutt |
+
+Ved oppstart vises en velkomstmelding som auto-detekterer status (data, modell) og foreslaar neste steg.
 
 ### Bakgrunnsjobber
 
@@ -588,10 +596,11 @@ betbot/
 │   ├── predictions/
 │   │   └── daily_picks.py          # DailyPicksFinder
 │   ├── tui/
-│   │   ├── app.py                  # BetBotApp hovedapplikasjon
+│   │   ├── app.py                  # BetBotApp chat-first layout
+│   │   ├── commands.py             # /command parsing
 │   │   ├── tasks.py                # Bakgrunnsjobber
 │   │   ├── styles/app.tcss         # Layout CSS
-│   │   └── widgets/                # UI-komponenter
+│   │   └── widgets/                # ChatPanel, DataQualityPanel, ActivityPanel, EventLog
 │   └── chat/
 │       ├── llm_provider.py         # Provider-protokoll
 │       ├── history.py              # Chat-historikk (SQLite)

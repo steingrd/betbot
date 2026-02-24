@@ -40,17 +40,16 @@ betbot/
 │   ├── predictions/
 │   │   └── daily_picks.py          # DailyPicksFinder for value bets
 │   ├── tui/                        # Textual TUI dashboard
-│   │   ├── app.py                  # BetBotApp - hovedapplikasjon
+│   │   ├── app.py                  # BetBotApp - chat-first single-screen
+│   │   ├── commands.py             # /command parsing (download, train, predict, etc.)
 │   │   ├── tasks.py                # Bakgrunnsjobber og meldinger
 │   │   ├── styles/app.tcss         # Textual CSS layout
 │   │   └── widgets/                # UI-komponenter
-│   │       ├── chat_panel.py       # LLM-chat med streaming
-│   │       ├── data_table_view.py  # Dataoversikt per liga
+│   │       ├── activity_panel.py   # Spinner + oppgavestatus
+│   │       ├── chat_panel.py       # LLM-chat med streaming og inline results
+│   │       ├── data_quality_panel.py # Datakvalitet-metrikker
 │   │       ├── event_log.py        # Hendelseslogg
-│   │       ├── football_spinner.py # ASCII-animasjon
-│   │       ├── predictions_view.py # Value bet-tabell
-│   │       ├── status_bar.py       # Statuslinje (data, modell, accuracy)
-│   │       └── training_view.py    # Treningsprogress og rapport
+│   │       └── football_spinner.py # ASCII-animasjon
 │   └── chat/                       # LLM-integrasjon
 │       ├── llm_provider.py         # ChatMessage og LLMProvider-protokoll
 │       ├── history.py              # SQLite chat-historikk
@@ -94,7 +93,7 @@ betbot/
 source .venv/bin/activate
 python scripts/run_tui.py
 ```
-Tastatursnarveier: `Ctrl+D` last ned data, `Ctrl+T` tren modell, `Ctrl+P` kjør predictions, `Escape` avbryt, `Ctrl+Q` avslutt.
+Bruk `/kommandoer` i chatten: `/download`, `/train`, `/predict`, `/status`, `/help`, `/clear`. `Escape` avbryter aktiv oppgave, `Ctrl+Q` avslutter.
 
 ### Last ned data
 ```bash
@@ -145,15 +144,27 @@ Systemet støtter både kalenderår-sesonger (Norge) og Aug-Mai sesonger (Premie
 
 ## TUI-arkitektur
 
-TUI-dashboardet er bygget med [Textual](https://textual.textualize.io/) og har følgende struktur:
+Chat-first single-screen layout bygget med [Textual](https://textual.textualize.io/):
 
-- **BetBotApp** (`src/tui/app.py`) — Hovedapp med layout, keybindings, og worker-håndtering
-- **tasks.py** — Bakgrunnsjobber (download, training, predictions) kjøres i Textual workers med thread=True
-- **Widgets** — Selvstendige UI-komponenter med egen CSS og tilstand
-- **ChatPanel** — LLM-integrasjon med async streaming, støtter Anthropic og OpenAI
-- **Meldingssystem** — Worker-tråder kommuniserer med UI via `post_message()` (Textual Messages)
+```
+┌──────────────────────────┬──────────────┐
+│  ChatPanel               │ DataQuality  │
+│  (LLM-chat, inline       │ ActivityPanel│
+│   results, /commands)     │ EventLog     │
+├──────────────────────────┴──────────────┤
+│  Footer                                 │
+└─────────────────────────────────────────┘
+```
+
+- **BetBotApp** (`src/tui/app.py`) — Hovedapp med layout og worker-håndtering
+- **commands.py** — `/command`-parsing, dispatcher
+- **tasks.py** — Bakgrunnsjobber kjøres i Textual workers med thread=True
+- **ChatPanel** — LLM-chat med streaming, inline predictions/reports, welcome message
+- **DataQualityPanel** — Kompakte metrikker (data, modell, accuracy)
+- **ActivityPanel** — Spinner + oppgavestatus for aktiv worker
 
 ### Konvensjoner for TUI-kode
+- Kommandoer via `/download`, `/train`, `/predict` i chatten (ikke keybindings)
 - Bakgrunnsjobber bruker `@work(thread=True)` og poster Messages til UI
 - Ingen direkte UI-kall fra worker-tråder — bruk `post_message()` eller `call_from_thread()`
 - Widgets har `DEFAULT_CSS` inline + felles layout i `styles/app.tcss`
