@@ -508,6 +508,67 @@ python scripts/get_todays_odds.py --detailed
 
 ---
 
+## 9. TUI Dashboard
+
+### Oversikt
+
+BetBot har et Textual-basert TUI-dashboard (`python scripts/run_tui.py`) som gir et interaktivt grensesnitt for hele pipelinen.
+
+### Layout
+
+Chat-first single-screen layout:
+
+```
+┌──────────────────────────┬──────────────┐
+│  ChatPanel               │ DataQuality  │
+│  (LLM-chat, inline       │ Panel        │
+│   results, /commands,     ├──────────────┤
+│   welcome message)        │ Activity     │
+│                           │ Panel        │
+│                           ├──────────────┤
+│                           │ EventLog     │
+├──────────────────────────┴──────────────┤
+│  Footer                                 │
+└─────────────────────────────────────────┘
+```
+
+### Chat-kommandoer
+
+Alle handlinger utfores via `/kommandoer` i chatten:
+
+| Kommando | Handling |
+|----------|----------|
+| /download | Last ned data fra FootyStats |
+| /train | Tren ML-modeller |
+| /predict | Finn value bets |
+| /status | Oppdater datakvalitet-panelet |
+| /help | Vis tilgjengelige kommandoer |
+| /clear | Nullstill chat-historikk |
+| Escape | Avbryt pagaende oppgave |
+| Ctrl+Q | Avslutt |
+
+Ved oppstart vises en velkomstmelding som auto-detekterer status (data, modell) og foreslaar neste steg.
+
+### Bakgrunnsjobber
+
+Alle tunge operasjoner kjorer i Textual workers (`@work(thread=True)`) og kommuniserer med UI via Messages:
+
+- **Download**: Laster ned sesonger fra FootyStats med progress per sesong
+- **Training**: Feature engineering + XGBoost-trening med progress bar
+- **Predictions**: Henter kamper fra Norsk Tipping, finner value bets
+
+Etter trening auto-triggres predictions, og etter predictions auto-triggres LLM-analyse.
+
+### LLM-integrasjon
+
+ChatPanel stotter Anthropic (Claude) og OpenAI med async streaming. Konfigureres via `.env`:
+- `ANTHROPIC_API_KEY` — prioriteres forst
+- `OPENAI_API_KEY` — fallback
+
+Chat-historikk lagres i `data/processed/chat.db`.
+
+---
+
 ## Appendix: Filstruktur
 
 ```
@@ -517,6 +578,7 @@ betbot/
 │   │   └── api_cache/          # Cached API-responses
 │   └── processed/
 │       ├── betbot.db           # SQLite database
+│       ├── chat.db             # Chat-historikk
 │       └── features.csv        # Genererte features
 ├── models/
 │   └── match_predictor.pkl     # Trent modell
@@ -529,14 +591,27 @@ betbot/
 │   │   └── feature_engineering.py  # Feature-generering
 │   ├── models/
 │   │   └── match_predictor.py      # ML-modeller
-│   └── analysis/
-│       └── value_finder.py         # Value bet detection
+│   ├── analysis/
+│   │   └── value_finder.py         # Value bet detection
+│   ├── predictions/
+│   │   └── daily_picks.py          # DailyPicksFinder
+│   ├── tui/
+│   │   ├── app.py                  # BetBotApp chat-first layout
+│   │   ├── commands.py             # /command parsing
+│   │   ├── tasks.py                # Bakgrunnsjobber
+│   │   ├── styles/app.tcss         # Layout CSS
+│   │   └── widgets/                # ChatPanel, DataQualityPanel, ActivityPanel, EventLog
+│   └── chat/
+│       ├── llm_provider.py         # Provider-protokoll
+│       ├── history.py              # Chat-historikk (SQLite)
+│       ├── system_prompt.py        # Dynamisk systemprompt
+│       └── providers/              # Anthropic og OpenAI
 └── scripts/
     ├── test_api.py                 # Test API-tilkobling
-    ├── download_data.py            # Last ned data
     ├── download_all_leagues.py     # Last ned alle valgte ligaer
     ├── run_backtest.py             # Kjor backtest
-    └── get_todays_odds.py          # Hent odds fra Norsk Tipping
+    ├── get_todays_odds.py          # Hent odds fra Norsk Tipping
+    └── run_tui.py                  # Start TUI dashboard
 ```
 
 ---

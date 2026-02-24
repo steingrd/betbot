@@ -1,0 +1,51 @@
+/* BetBot TUI Layout - Chat-first single-screen */
+
+Screen {
+    layout: vertical;
+}
+
+/* Main content: chat on left, panels on right */
+#main-content {
+    layout: horizontal;
+    height: 1fr;
+}
+
+/* Chat panel fills left side */
+ChatPanel {
+    width: 1fr;
+}
+
+/* Right panel: stacked data quality, activity, event log */
+#right-panel {
+    layout: vertical;
+    width: 32;
+    border-left: solid $accent;
+}
+
+DataQualityPanel {
+    border-bottom: solid $accent;
+}
+
+ActivityPanel {
+    border-bottom: solid $accent;
+}
+
+EventLog {
+    dock: none;
+    width: 100%;
+    height: 1fr;
+    border-left: none;
+    padding: 0 1;
+}
+
+/* Size warning overlay */
+#size-warning {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    background: $surface;
+    color: $warning;
+    text-style: bold;
+    layer: overlay;
+}
