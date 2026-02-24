@@ -93,7 +93,7 @@ betbot/
 source .venv/bin/activate
 python scripts/run_tui.py
 ```
-Bruk `/kommandoer` i chatten: `/download`, `/train`, `/predict`, `/status`, `/help`, `/clear`. `Escape` avbryter aktiv oppgave, `Ctrl+Q` avslutter.
+Bruk `/kommandoer` i chatten: `/download`, `/train`, `/predict`, `/results`, `/status`, `/help`, `/clear`. `Escape` avbryter aktiv oppgave, `Ctrl+Q` avslutter.
 
 ### Last ned data
 ```bash

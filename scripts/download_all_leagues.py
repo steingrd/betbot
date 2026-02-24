@@ -6,7 +6,9 @@ Saves both match data and season metadata for proper per-league holdout splits.
 """
 
 import sys
+import time
 import hashlib
+import sqlite3
 from pathlib import Path
 from datetime import datetime
 
@@ -113,6 +115,15 @@ def main():
     failed = 0
     total_matches = 0
 
+    def is_active_season(proc, sid):
+        """Check if a season is still active (end_date in the future or NULL)."""
+        conn = sqlite3.connect(str(proc.db_path))
+        row = conn.execute("SELECT end_date FROM seasons WHERE id = ?", (sid,)).fetchone()
+        conn.close()
+        if row is None or row[0] is None:
+            return True
+        return row[0] > time.time()
+
     for i, season in enumerate(all_seasons):
         season_id = season["season_id"]
         league_id = season["league_id"]
@@ -129,8 +140,12 @@ def main():
                 season_label=f"{season['country']} {season['league_name']} {season['year']}"
             )
 
+            # For active seasons, bypass cache to get fresh data
+            active = is_active_season(processor, season_id)
+            use_cache = not active
+
             # Get matches
-            response = client.get_league_matches(season_id)
+            response = client.get_league_matches(season_id, use_cache=use_cache)
 
             if isinstance(response, dict) and "data" in response:
                 matches = response["data"]
@@ -141,20 +156,8 @@ def main():
                 print(f"{progress} {season['country']} {season['league_name']} {season['year']}: No matches")
                 continue
 
-            # Process and save with league_id
+            # Process and save with league_id (upsert updates existing matches)
             df = processor.process_matches(matches, season_id, league_id=league_id)
-
-            # Check if already in database (avoid duplicates)
-            existing = processor.load_matches(season_id)
-            if len(existing) > 0:
-                print(f"{progress} {season['country']} {season['league_name']} {season['year']}: Already in DB ({len(existing)} matches)")
-                # Still update season dates from existing data
-                if len(existing) > 0:
-                    start_date = int(existing["date_unix"].min())
-                    end_date = int(existing["date_unix"].max())
-                    processor.update_season_dates(season_id, start_date, end_date)
-                continue
-
             processor.save_matches(df)
 
             # Update season start/end dates
@@ -163,9 +166,10 @@ def main():
                 end_date = int(df["date_unix"].max())
                 processor.update_season_dates(season_id, start_date, end_date)
 
+            tag = "(fresh)" if not use_cache else "(cached)"
             downloaded += 1
             total_matches += len(matches)
-            print(f"{progress} {season['country']} {season['league_name']} {season['year']}: ✓ {len(matches)} matches")
+            print(f"{progress} {season['country']} {season['league_name']} {season['year']}: ✓ {len(matches)} matches {tag}")
 
         except Exception as e:
             failed += 1

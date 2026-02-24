@@ -229,7 +229,7 @@ class ChatPanel(Widget):
             self._clear_chat()
         elif cmd.name == "help":
             self._show_help()
-        elif cmd.name in ("download", "train", "predict", "status"):
+        elif cmd.name in ("download", "train", "predict", "results", "status"):
             self._add_user_bubble(f"/{cmd.name}" + (f" {cmd.args}" if cmd.args else ""))
             self.post_message(self.CommandRequested(cmd.name, cmd.args))
         elif cmd.name in COMMANDS:
@@ -300,6 +300,26 @@ class ChatPanel(Widget):
             acc_str = f"{acc:.1%}" if acc is not None else "-"
             ll_str = f"{ll:.4f}" if ll is not None else "-"
             lines.append(f"| {label} | {acc_str} | {ll_str} |")
+
+        md = "\n".join(lines)
+        container = self.query_one("#chat-messages", VerticalScroll)
+        widget = Markdown(md, classes="chat-assistant")
+        container.mount(widget)
+        container.scroll_end(animate=False)
+
+    def render_results_inline(self, rows: list) -> None:
+        """Render recent match results as a formatted table inline in chat."""
+        lines = ["**Nyeste resultater**", ""]
+        lines.append("| Dato | Liga | Kamp |")
+        lines.append("|------|------|------|")
+        for row in rows:
+            date_unix, country, league_name, home, hg, ag, away = row
+            date_str = datetime.fromtimestamp(date_unix).strftime("%d.%m")
+            league = league_name or country or "?"
+            # Truncate league name to keep table readable
+            if len(league) > 16:
+                league = league[:15] + "."
+            lines.append(f"| {date_str} | {league} | {home} {hg}-{ag} {away} |")
 
         md = "\n".join(lines)
         container = self.query_one("#chat-messages", VerticalScroll)

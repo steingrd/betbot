@@ -19,6 +19,7 @@ COMMANDS: dict[str, str] = {
     "predict": "Finn value bets for kommende kamper",
     "help": "Vis tilgjengelige kommandoer",
     "clear": "Nullstill chat-historikk",
+    "results": "Vis nyeste kampresultater",
     "status": "Vis naavaerende status",
 }
 

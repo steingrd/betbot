@@ -18,7 +18,7 @@ ChatPanel {
 /* Right panel: stacked data quality, activity, event log */
 #right-panel {
     layout: vertical;
-    width: 32;
+    width: 48;
     border-left: solid $accent;
 }
 

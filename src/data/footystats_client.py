@@ -105,9 +105,9 @@ class FootyStatsClient:
             params["chosen_leagues_only"] = "true"
         return self._request("league-list", params)
 
-    def get_league_matches(self, season_id: int) -> list:
+    def get_league_matches(self, season_id: int, use_cache: bool = True) -> list:
         """Get all matches for a season"""
-        return self._request("league-matches", {"season_id": season_id})
+        return self._request("league-matches", {"season_id": season_id}, use_cache=use_cache)
 
     def get_league_season(self, season_id: int) -> dict:
         """Get season details including stats"""
