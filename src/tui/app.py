@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 
 from textual import work
@@ -25,10 +23,7 @@ from .tasks import (
     TrainingError,
     TrainingFinished,
     TrainingProgress,
-    build_download_queue,
-    enable_wal_mode,
-    filter_download_queue,
-    run_download_task,
+    run_download,
     run_predictions,
     run_training,
 )
@@ -169,71 +164,11 @@ class BetBotApp(App):
     def _run_download(self, full: bool = False) -> None:
         """Background download of league data. Skips finished seasons unless full=True."""
         worker = get_current_worker()
-
-        api_key = os.getenv("FOOTYSTATS_API_KEY", "")
-        if not api_key or api_key == "example":
-            self.post_message(DownloadError("FOOTYSTATS_API_KEY ikke satt i .env"))
-            return
-
-        from src.data.data_processor import DataProcessor
-        from src.data.footystats_client import FootyStatsClient
-
-        client = FootyStatsClient(api_key=api_key)
-        processor = DataProcessor()
-        processor.init_database()
-
-        enable_wal_mode(processor.db_path)
-
-        if not client.test_connection():
-            self.post_message(DownloadError("Kunne ikke koble til FootyStats API"))
-            return
-
-        tasks = build_download_queue(client)
-        if not tasks:
-            self.post_message(DownloadError("Ingen ligaer funnet - velg ligaer paa FootyStats forst"))
-            return
-
-        # Filter out finished seasons unless full download requested
-        skipped_results: list[DownloadResult] = []
-        if not full:
-            tasks, skipped_tasks = filter_download_queue(tasks, processor)
-            if skipped_tasks:
-                self.call_from_thread(
-                    self._event_log.log_info,
-                    f"Hopper over {len(skipped_tasks)} ferdige sesonger",
-                )
-                skipped_results = [DownloadResult(task=t, skipped=True) for t in skipped_tasks]
-
-        if not tasks:
-            self.call_from_thread(
-                self._event_log.log_info,
-                "Alle sesonger er oppdatert",
-            )
-            self.post_message(DownloadFinished(results=skipped_results))
-            return
-
-        self.call_from_thread(
-            self._event_log.log_info,
-            f"Laster ned {len(tasks)} sesonger"
-            + (f" (hopper over {len(skipped_results)})" if skipped_results else ""),
+        run_download(
+            on_progress=self.post_message,
+            is_cancelled=lambda: worker.is_cancelled,
+            full=full,
         )
-
-        results: list[DownloadResult] = list(skipped_results)
-
-        for i, task in enumerate(tasks):
-            if worker.is_cancelled:
-                self.call_from_thread(
-                    self._event_log.log_warning,
-                    f"Nedlasting avbrutt etter {i}/{len(tasks)} sesonger",
-                )
-                break
-
-            result = run_download_task(task, client, processor)
-            results.append(result)
-
-            self.post_message(DownloadProgress(result=result, completed=i + 1, total=len(tasks)))
-
-        self.post_message(DownloadFinished(results=results))
 
     # --- Training ---
 
@@ -249,7 +184,10 @@ class BetBotApp(App):
     def _run_training(self) -> None:
         """Background feature engineering + model training."""
         worker = get_current_worker()
-        run_training(self, worker)
+        run_training(
+            on_progress=self.post_message,
+            is_cancelled=lambda: worker.is_cancelled,
+        )
 
     # --- Predictions ---
 
@@ -265,7 +203,10 @@ class BetBotApp(App):
     def _run_predictions(self) -> None:
         """Background prediction pipeline."""
         worker = get_current_worker()
-        run_predictions(self, worker)
+        run_predictions(
+            on_progress=self.post_message,
+            is_cancelled=lambda: worker.is_cancelled,
+        )
 
     # --- Cancel ---
 
