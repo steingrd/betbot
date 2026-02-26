@@ -280,12 +280,14 @@ class FeatureEngineer:
 
         return {"position": 10, "points": 0, "goal_diff": 0}
 
-    def generate_features(self, min_matches: int = 3, progress_callback=None) -> pd.DataFrame:
+    def generate_features(self, min_matches: int = 3, progress_callback=None,
+                          skip_match_ids: set = None) -> pd.DataFrame:
         """Generate all features for each match
 
         Args:
             min_matches: Minimum matches played before including a team
             progress_callback: Optional function(current, total) called for progress updates
+            skip_match_ids: Set of match IDs to skip (already have cached features)
         """
 
         features_list = []
@@ -294,6 +296,10 @@ class FeatureEngineer:
         for idx, match in self.matches.iterrows():
             if progress_callback and idx % 1000 == 0:
                 progress_callback(idx, total)
+
+            # Skip matches that already have cached features
+            if skip_match_ids and match["id"] in skip_match_ids:
+                continue
             match_date = match["date_unix"]
             home_id = match["home_team_id"]
             away_id = match["away_team_id"]

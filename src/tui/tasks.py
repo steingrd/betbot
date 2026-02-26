@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 from textual.message import Message
 
 
@@ -455,12 +456,36 @@ def run_training(app, worker) -> None:
     if worker.is_cancelled:
         return
 
-    # Step 2: Generate features
+    # Step 2: Generate features (incremental - reuse cached features)
     app.post_message(TrainingProgress(step="Features", detail="Genererer features...", percent=5))
 
     step_start = time.time()
+
+    # Load cached features to skip already-computed matches
+    features_path = processor.db_path.parent / "features.csv"
+    cached_df = None
+    skip_ids = None
+    if features_path.exists():
+        try:
+            cached_df = pd.read_csv(features_path)
+            # Validate that cached features have the expected columns
+            expected_cols = set(MatchPredictor.FEATURE_COLS)
+            if expected_cols.issubset(set(cached_df.columns)):
+                skip_ids = set(cached_df["match_id"].tolist())
+                new_match_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
+                app.post_message(
+                    TrainingProgress(
+                        step="Features",
+                        detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
+                        percent=7,
+                    )
+                )
+            else:
+                cached_df = None  # Column mismatch - regenerate all
+        except Exception:
+            cached_df = None
+
     engineer = FeatureEngineer(matches)
-    total_matches = len(matches)
 
     def feature_progress(current, total):
         pct = 5 + int((current / total) * 70)  # 5-75%
@@ -468,18 +493,32 @@ def run_training(app, worker) -> None:
             TrainingProgress(step="Features", detail=f"{current:,}/{total:,} kamper", percent=pct)
         )
 
-    features_df = engineer.generate_features(min_matches=3, progress_callback=feature_progress)
+    new_features_df = engineer.generate_features(
+        min_matches=3, progress_callback=feature_progress, skip_match_ids=skip_ids
+    )
+
+    # Combine cached + new features
+    if cached_df is not None and len(new_features_df) > 0:
+        features_df = pd.concat([cached_df, new_features_df], ignore_index=True)
+        # Remove any duplicates (shouldn't happen, but safety net)
+        features_df = features_df.drop_duplicates(subset=["match_id"], keep="last")
+    elif cached_df is not None and len(new_features_df) == 0:
+        features_df = cached_df
+    else:
+        features_df = new_features_df
 
     step_elapsed = time.time() - step_start
     report["steps"]["generate_features"] = {
         "duration_seconds": step_elapsed,
         "features_generated": len(features_df),
         "feature_columns": len(features_df.columns),
+        "cached_features": len(cached_df) if cached_df is not None else 0,
+        "new_features": len(new_features_df),
     }
     report["data_stats"]["features_generated"] = len(features_df)
 
     app.post_message(
-        TrainingProgress(step="Features", detail=f"Genererte {len(features_df):,} feature-rader", percent=75)
+        TrainingProgress(step="Features", detail=f"Genererte {len(features_df):,} feature-rader ({len(new_features_df):,} nye)", percent=75)
     )
 
     if worker.is_cancelled:

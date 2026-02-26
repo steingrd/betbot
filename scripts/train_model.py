@@ -122,24 +122,55 @@ def main():
     }
     report["data_stats"]["total_matches"] = len(matches)
 
-    # Step 2: Generate features
+    # Step 2: Generate features (incremental - reuse cached features)
     step_start = time.time()
     print("[2/4] Generating features...")
     print("       Calculating form, H2H, positions for each match")
     print("       Using time-based split (train on earlier, test on later)")
     print()
 
+    # Load cached features to skip already-computed matches
+    output_path = processor.db_path.parent / "features.csv"
+    cached_df = None
+    skip_ids = None
+    if output_path.exists():
+        try:
+            import pandas as pd
+            cached_df = pd.read_csv(output_path)
+            expected_cols = set(MatchPredictor.FEATURE_COLS)
+            if expected_cols.issubset(set(cached_df.columns)):
+                skip_ids = set(cached_df["match_id"].tolist())
+                new_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
+                print(f"       Cache: {len(skip_ids):,} features cached, {new_count:,} new matches")
+            else:
+                print("       Cache invalidated (feature columns changed)")
+                cached_df = None
+        except Exception as e:
+            print(f"       Could not load cache: {e}")
+            cached_df = None
+
     engineer = FeatureEngineer(matches)
     progress = ProgressTracker()
 
-    features_df = engineer.generate_features(min_matches=3, progress_callback=progress.update)
+    new_features_df = engineer.generate_features(
+        min_matches=3, progress_callback=progress.update, skip_match_ids=skip_ids
+    )
+
+    # Combine cached + new features
+    if cached_df is not None and len(new_features_df) > 0:
+        import pandas as pd
+        features_df = pd.concat([cached_df, new_features_df], ignore_index=True)
+        features_df = features_df.drop_duplicates(subset=["match_id"], keep="last")
+    elif cached_df is not None and len(new_features_df) == 0:
+        features_df = cached_df
+    else:
+        features_df = new_features_df
 
     elapsed = time.time() - step_start
     print()
-    print(f"       Generated {len(features_df):,} feature rows ({format_duration(elapsed)})")
+    print(f"       Generated {len(features_df):,} feature rows ({len(new_features_df):,} new) ({format_duration(elapsed)})")
 
     # Save features
-    output_path = processor.db_path.parent / "features.csv"
     features_df.to_csv(output_path, index=False)
     print(f"       Saved to {output_path}")
     print()
@@ -147,7 +178,9 @@ def main():
     report["steps"]["generate_features"] = {
         "duration_seconds": elapsed,
         "features_generated": len(features_df),
-        "feature_columns": len(features_df.columns)
+        "feature_columns": len(features_df.columns),
+        "cached_features": len(cached_df) if cached_df is not None else 0,
+        "new_features": len(new_features_df),
     }
     report["data_stats"]["features_generated"] = len(features_df)
 
