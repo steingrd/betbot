@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .routes import chat, data, predictions, tasks
@@ -22,6 +23,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Load .env
 load_dotenv(PROJECT_ROOT / ".env")
+
+WEB_DIST = PROJECT_ROOT / "web" / "dist"
 
 
 @asynccontextmanager
@@ -54,6 +57,23 @@ app.include_router(predictions.router)
 app.include_router(chat.router)
 
 # Serve built React app in production
-WEB_DIST = PROJECT_ROOT / "web" / "dist"
 if WEB_DIST.exists():
-    app.mount("/", StaticFiles(directory=str(WEB_DIST), html=True), name="static")
+    # Mount static assets (JS, CSS, images)
+    app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="static-assets")
+
+    # SPA fallback: serve index.html for all non-API routes
+    @app.get("/{path:path}")
+    async def serve_spa(request: Request, path: str):
+        # Check if it's a static file that exists
+        file_path = WEB_DIST / path
+        if path and file_path.is_file():
+            return FileResponse(str(file_path))
+        # Otherwise serve index.html (SPA client-side routing)
+        return FileResponse(str(WEB_DIST / "index.html"))
+else:
+
+    @app.get("/")
+    async def no_frontend():
+        return HTMLResponse(
+            "<h1>BetBot API</h1><p>Frontend not built. Run: <code>cd web && npm run build</code></p>"
+        )
