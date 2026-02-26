@@ -27,6 +27,7 @@ from .tasks import (
     TrainingProgress,
     build_download_queue,
     enable_wal_mode,
+    filter_download_queue,
     run_download_task,
     run_predictions,
     run_training,
@@ -109,7 +110,8 @@ class BetBotApp(App):
 
     def on_chat_panel_command_requested(self, message: ChatPanel.CommandRequested) -> None:
         if message.command == "download":
-            self._start_download()
+            full = message.args.strip().lower() == "full"
+            self._start_download(full=full)
         elif message.command == "train":
             self._start_training()
         elif message.command == "predict":
@@ -155,17 +157,17 @@ class BetBotApp(App):
 
     # --- Download ---
 
-    def _start_download(self) -> None:
+    def _start_download(self, full: bool = False) -> None:
         if self._download_worker is not None and self._download_worker.state == WorkerState.RUNNING:
             self._event_log.log_warning("Nedlasting kjorer allerede - trykk Escape for a avbryte")
             return
         self._event_log.log_info("Starter datanedlasting...")
         self._activity_panel.set_task("Laster ned data...")
-        self._download_worker = self._run_download()
+        self._download_worker = self._run_download(full=full)
 
     @work(thread=True)
-    def _run_download(self) -> None:
-        """Background download of all league data."""
+    def _run_download(self, full: bool = False) -> None:
+        """Background download of league data. Skips finished seasons unless full=True."""
         worker = get_current_worker()
 
         api_key = os.getenv("FOOTYSTATS_API_KEY", "")
@@ -191,12 +193,32 @@ class BetBotApp(App):
             self.post_message(DownloadError("Ingen ligaer funnet - velg ligaer paa FootyStats forst"))
             return
 
+        # Filter out finished seasons unless full download requested
+        skipped_results: list[DownloadResult] = []
+        if not full:
+            tasks, skipped_tasks = filter_download_queue(tasks, processor)
+            if skipped_tasks:
+                self.call_from_thread(
+                    self._event_log.log_info,
+                    f"Hopper over {len(skipped_tasks)} ferdige sesonger",
+                )
+                skipped_results = [DownloadResult(task=t, skipped=True) for t in skipped_tasks]
+
+        if not tasks:
+            self.call_from_thread(
+                self._event_log.log_info,
+                "Alle sesonger er oppdatert",
+            )
+            self.post_message(DownloadFinished(results=skipped_results))
+            return
+
         self.call_from_thread(
             self._event_log.log_info,
-            f"Fant {len(tasks)} sesonger a laste ned",
+            f"Laster ned {len(tasks)} sesonger"
+            + (f" (hopper over {len(skipped_results)})" if skipped_results else ""),
         )
 
-        results: list[DownloadResult] = []
+        results: list[DownloadResult] = list(skipped_results)
 
         for i, task in enumerate(tasks):
             if worker.is_cancelled:
@@ -291,15 +313,20 @@ class BetBotApp(App):
         self._activity_panel.clear_task()
         self._download_worker = None
 
-        total = len(message.results)
-        ok = sum(1 for r in message.results if r.ok)
+        ok = sum(1 for r in message.results if r.ok and not r.skipped)
         failed = sum(1 for r in message.results if r.error)
-        matches = sum(r.match_count for r in message.results if r.ok)
+        skipped = sum(1 for r in message.results if r.skipped)
+        matches = sum(r.match_count for r in message.results if r.ok and not r.skipped)
 
-        summary = f"Nedlasting ferdig: {ok} sesonger, {failed} feil, {matches} kamper lastet ned"
-        self._event_log.log_success(
-            f"Ferdig: {ok} sesonger, {failed} feil, {matches} kamper"
-        )
+        parts = [f"{ok} sesonger"]
+        if skipped:
+            parts.append(f"{skipped} hoppet over")
+        if failed:
+            parts.append(f"{failed} feil")
+        parts.append(f"{matches} kamper lastet ned")
+
+        summary = "Nedlasting ferdig: " + ", ".join(parts)
+        self._event_log.log_success(summary)
         self._chat_panel.render_system_message(summary)
 
         self._data_quality.refresh_data()

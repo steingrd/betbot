@@ -142,6 +142,58 @@ def build_download_queue(client) -> list[DownloadTask]:
     return tasks
 
 
+# Grace period: treat seasons as active if last match was < 30 days ago
+_GRACE_PERIOD_SECONDS = 30 * 86400
+
+
+def filter_download_queue(
+    tasks: list[DownloadTask], processor, now: float | None = None
+) -> tuple[list[DownloadTask], list[DownloadTask]]:
+    """Filter download queue to skip finished seasons already in DB.
+
+    Returns:
+        Tuple of (tasks_to_download, tasks_skipped)
+    """
+    if now is None:
+        now = time.time()
+
+    conn = sqlite3.connect(str(processor.db_path))
+    rows = conn.execute(
+        """
+        SELECT s.id, s.end_date, COUNT(m.id) as match_count
+        FROM seasons s
+        LEFT JOIN matches m ON s.id = m.season_id
+        GROUP BY s.id
+        """
+    ).fetchall()
+    conn.close()
+
+    known: dict[int, tuple[int | None, int]] = {}
+    for season_id, end_date, match_count in rows:
+        known[season_id] = (end_date, match_count)
+
+    to_download: list[DownloadTask] = []
+    skipped: list[DownloadTask] = []
+
+    for task in tasks:
+        if task.season_id not in known:
+            to_download.append(task)
+        elif known[task.season_id][1] == 0:
+            # Season metadata exists but no matches — need to download
+            to_download.append(task)
+        elif known[task.season_id][0] is None:
+            # No end date known — treat as active
+            to_download.append(task)
+        elif known[task.season_id][0] + _GRACE_PERIOD_SECONDS > now:
+            # Active or recently ended — still download
+            to_download.append(task)
+        else:
+            # Finished season with data in DB — skip
+            skipped.append(task)
+
+    return to_download, skipped
+
+
 def _is_active_season(processor, season_id: int) -> bool:
     """Check if a season is still active (end_date in the future or NULL)."""
     import sqlite3

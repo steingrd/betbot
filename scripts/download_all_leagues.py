@@ -3,8 +3,10 @@
 Download all available league data from FootyStats API.
 
 Saves both match data and season metadata for proper per-league holdout splits.
+By default, skips finished seasons already in the database. Use --full to re-download everything.
 """
 
+import argparse
 import sys
 import time
 import hashlib
@@ -24,9 +26,9 @@ from data.footystats_client import FootyStatsClient
 from data.data_processor import DataProcessor
 
 
-def main():
+def main(full: bool = False):
     print("=" * 60)
-    print("BETBOT - FULL DATA DOWNLOAD")
+    print("BETBOT - DATA DOWNLOAD" + (" (FULL)" if full else ""))
     print("=" * 60)
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
@@ -93,7 +95,43 @@ def main():
                 "year": "Current",
             })
 
-    print(f"   ✓ Found {len(all_seasons)} seasons to download")
+    print(f"   ✓ Found {len(all_seasons)} seasons total")
+
+    # Filter out finished seasons unless --full
+    if not full:
+        conn = sqlite3.connect(str(processor.db_path))
+        rows = conn.execute("""
+            SELECT s.id, s.end_date, COUNT(m.id) as match_count
+            FROM seasons s
+            LEFT JOIN matches m ON s.id = m.season_id
+            GROUP BY s.id
+        """).fetchall()
+        conn.close()
+
+        known = {r[0]: (r[1], r[2]) for r in rows}
+        now = time.time()
+        grace_period = 30 * 86400  # 30 days
+        filtered = []
+        skipped_count = 0
+
+        for s in all_seasons:
+            sid = s["season_id"]
+            if sid not in known:
+                filtered.append(s)
+            elif known[sid][1] == 0:
+                filtered.append(s)
+            elif known[sid][0] is None:
+                filtered.append(s)
+            elif known[sid][0] + grace_period > now:
+                filtered.append(s)
+            else:
+                skipped_count += 1
+
+        if skipped_count > 0:
+            print(f"\n   Hopper over {skipped_count} ferdige sesonger (bruk --full for aa laste alt)")
+        all_seasons = filtered
+
+    print(f"   {len(all_seasons)} sesonger aa laste ned")
 
     # Group seasons by league for display
     leagues_found = {}
@@ -206,4 +244,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Download league data from FootyStats")
+    parser.add_argument("--full", action="store_true", help="Re-download all seasons (default: skip finished)")
+    args = parser.parse_args()
+    main(full=args.full)

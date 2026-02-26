@@ -14,7 +14,7 @@ class ChatCommand:
 
 
 COMMANDS: dict[str, str] = {
-    "download": "Last ned data fra FootyStats",
+    "download": "Last ned nye data fra FootyStats (/download full for alt)",
     "train": "Tren ML-modeller",
     "predict": "Finn value bets for kommende kamper",
     "help": "Vis tilgjengelige kommandoer",
