@@ -27,6 +27,9 @@ def safe_divide(a, b, default=0.0):
 class FeatureEngineer:
     """Generate features for match prediction"""
 
+    # Increment when feature logic changes to invalidate stale caches
+    FEATURE_VERSION = "2"
+
     def __init__(self, matches_df: pd.DataFrame):
         # Sort by date
         self.matches = matches_df.sort_values("date_unix").reset_index(drop=True)

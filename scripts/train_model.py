@@ -21,6 +21,12 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from data.data_processor import DataProcessor
+from features.cache_metadata import (
+    compute_source_fingerprint,
+    read_cache_metadata,
+    validate_cache_metadata,
+    write_cache_metadata,
+)
 from features.feature_engineering import FeatureEngineer
 from models.match_predictor import MatchPredictor
 
@@ -131,20 +137,31 @@ def main():
 
     # Load cached features to skip already-computed matches
     output_path = processor.db_path.parent / "features.csv"
+    metadata_path = output_path.with_suffix(".meta.json")
     cached_df = None
     skip_ids = None
+    source_fingerprint = compute_source_fingerprint(matches)
     if output_path.exists():
         try:
             import pandas as pd
-            cached_df = pd.read_csv(output_path)
-            expected_cols = set(MatchPredictor.FEATURE_COLS)
-            if expected_cols.issubset(set(cached_df.columns)):
-                skip_ids = set(cached_df["match_id"].tolist())
-                new_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
-                print(f"       Cache: {len(skip_ids):,} features cached, {new_count:,} new matches")
+            metadata = read_cache_metadata(metadata_path)
+            cache_ok, reason = validate_cache_metadata(
+                metadata,
+                feature_version=FeatureEngineer.FEATURE_VERSION,
+                source_fingerprint=source_fingerprint,
+            )
+            if cache_ok:
+                cached_df = pd.read_csv(output_path)
+                expected_cols = set(MatchPredictor.FEATURE_COLS)
+                if expected_cols.issubset(set(cached_df.columns)):
+                    skip_ids = set(cached_df["match_id"].tolist())
+                    new_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
+                    print(f"       Cache: {len(skip_ids):,} features cached, {new_count:,} new matches")
+                else:
+                    print("       Cache invalidated (feature columns changed)")
+                    cached_df = None
             else:
-                print("       Cache invalidated (feature columns changed)")
-                cached_df = None
+                print(f"       Cache invalidated ({reason})")
         except Exception as e:
             print(f"       Could not load cache: {e}")
             cached_df = None
@@ -170,8 +187,14 @@ def main():
     print()
     print(f"       Generated {len(features_df):,} feature rows ({len(new_features_df):,} new) ({format_duration(elapsed)})")
 
-    # Save features
+    # Save features and cache metadata
     features_df.to_csv(output_path, index=False)
+    write_cache_metadata(
+        metadata_path,
+        feature_version=FeatureEngineer.FEATURE_VERSION,
+        source_fingerprint=source_fingerprint,
+        match_count=len(matches),
+    )
     print(f"       Saved to {output_path}")
     print()
 

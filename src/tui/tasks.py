@@ -415,6 +415,12 @@ def run_training(app, worker) -> None:
         worker: The current worker (for cancellation checks)
     """
     from src.data.data_processor import DataProcessor
+    from src.features.cache_metadata import (
+        compute_source_fingerprint,
+        read_cache_metadata,
+        validate_cache_metadata,
+        write_cache_metadata,
+    )
     from src.features.feature_engineering import FeatureEngineer
     from src.models.match_predictor import MatchPredictor
 
@@ -463,25 +469,42 @@ def run_training(app, worker) -> None:
 
     # Load cached features to skip already-computed matches
     features_path = processor.db_path.parent / "features.csv"
+    metadata_path = features_path.with_suffix(".meta.json")
     cached_df = None
     skip_ids = None
+    source_fingerprint = compute_source_fingerprint(matches)
     if features_path.exists():
         try:
-            cached_df = pd.read_csv(features_path)
-            # Validate that cached features have the expected columns
-            expected_cols = set(MatchPredictor.FEATURE_COLS)
-            if expected_cols.issubset(set(cached_df.columns)):
-                skip_ids = set(cached_df["match_id"].tolist())
-                new_match_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
+            metadata = read_cache_metadata(metadata_path)
+            cache_ok, reason = validate_cache_metadata(
+                metadata,
+                feature_version=FeatureEngineer.FEATURE_VERSION,
+                source_fingerprint=source_fingerprint,
+            )
+            if cache_ok:
+                cached_df = pd.read_csv(features_path)
+                # Validate that cached features have the expected columns
+                expected_cols = set(MatchPredictor.FEATURE_COLS)
+                if expected_cols.issubset(set(cached_df.columns)):
+                    skip_ids = set(cached_df["match_id"].tolist())
+                    new_match_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
+                    app.post_message(
+                        TrainingProgress(
+                            step="Features",
+                            detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
+                            percent=7,
+                        )
+                    )
+                else:
+                    cached_df = None  # Column mismatch - regenerate all
+            else:
                 app.post_message(
                     TrainingProgress(
                         step="Features",
-                        detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
+                        detail=f"Cache invalidert ({reason})",
                         percent=7,
                     )
                 )
-            else:
-                cached_df = None  # Column mismatch - regenerate all
         except Exception:
             cached_df = None
 
@@ -531,9 +554,15 @@ def run_training(app, worker) -> None:
         )
         return
 
-    # Save features CSV
+    # Save features CSV + metadata
     output_path = processor.db_path.parent / "features.csv"
     features_df.to_csv(output_path, index=False)
+    write_cache_metadata(
+        output_path.with_suffix(".meta.json"),
+        feature_version=FeatureEngineer.FEATURE_VERSION,
+        source_fingerprint=source_fingerprint,
+        match_count=len(matches),
+    )
 
     if worker.is_cancelled:
         return

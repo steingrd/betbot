@@ -33,6 +33,12 @@ def print_progress(current, total, start_time=[None]):
           f"{mins_elapsed}m elapsed, ~{mins_remaining}m remaining", end="", flush=True)
 
 from data.data_processor import DataProcessor
+from features.cache_metadata import (
+    compute_source_fingerprint,
+    read_cache_metadata,
+    validate_cache_metadata,
+    write_cache_metadata,
+)
 from features.feature_engineering import FeatureEngineer
 from models.match_predictor import MatchPredictor
 from analysis.value_finder import ValueBetFinder
@@ -182,8 +188,9 @@ def split_train_test_per_league(
                 print(f"  Note: Excluding {len(ongoing_seasons)} ongoing season(s) from holdout: {ongoing_labels}")
             league_seasons = completed_seasons
 
+        league_name = league_seasons["league_name"].iloc[0] if len(league_seasons) > 0 else f"League {league_id}"
+
         if len(league_seasons) < 2:
-            league_name = league_seasons["league_name"].iloc[0] if len(league_seasons) > 0 else f"League {league_id}"
             print(f"  WARNING: {league_name} has only {len(league_seasons)} season(s), skipping holdout")
             # Include all in training
             train_seasons.extend(league_seasons["season_id"].tolist())
@@ -193,6 +200,21 @@ def split_train_test_per_league(
                 "train_seasons": len(league_seasons),
                 "test_seasons": 0,
                 "warning": "< 2 seasons"
+            })
+            continue
+
+        if holdout_seasons >= len(league_seasons):
+            print(
+                f"  WARNING: {league_name} has {len(league_seasons)} season(s) but holdout_seasons={holdout_seasons} "
+                f"would leave train empty — skipping holdout for this league"
+            )
+            train_seasons.extend(league_seasons["season_id"].tolist())
+            split_info.append({
+                "league_id": league_id,
+                "league_name": league_name,
+                "train_seasons": len(league_seasons),
+                "test_seasons": 0,
+                "warning": f"holdout_seasons ({holdout_seasons}) >= available seasons ({len(league_seasons)})"
             })
             continue
 
@@ -414,26 +436,46 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
 
     # Load or generate features (with caching)
     features_cache = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
+    features_metadata = features_cache.with_suffix(".meta.json")
+    source_fingerprint = compute_source_fingerprint(matches)
+    expected_cols = set(MatchPredictor.FEATURE_COLS)
+    need_regenerate = True
+    features = None
 
     if features_cache.exists():
         print(f"\nLoading cached features from {features_cache.name}...")
-        features = pd.read_csv(features_cache)
-        print(f"Loaded {len(features)} cached features")
+        metadata = read_cache_metadata(features_metadata)
+        cache_ok, reason = validate_cache_metadata(
+            metadata,
+            feature_version=FeatureEngineer.FEATURE_VERSION,
+            source_fingerprint=source_fingerprint,
+        )
+        if not cache_ok:
+            print(f"Cache invalidated ({reason})")
+        else:
+            features = pd.read_csv(features_cache)
+            print(f"Loaded {len(features)} cached features")
+            if (
+                expected_cols.issubset(set(features.columns))
+                and "season_id" in features.columns
+                and "league_id" in features.columns
+            ):
+                need_regenerate = False
+            else:
+                print("Cache invalidated (missing required feature columns)")
 
-        # Check if cache has required columns
-        if "season_id" not in features.columns or "league_id" not in features.columns:
-            print("Cache missing season_id/league_id - regenerating...")
-            engineer = FeatureEngineer(matches)
-            features = engineer.generate_features(progress_callback=print_progress)
-            print()  # Newline after progress
-            features.to_csv(features_cache, index=False)
-            print(f"Generated and cached {len(features)} features")
-    else:
+    if need_regenerate:
         print(f"\nGenerating features (this takes a while first time)...")
         engineer = FeatureEngineer(matches)
         features = engineer.generate_features(progress_callback=print_progress)
         print()  # Newline after progress
         features.to_csv(features_cache, index=False)
+        write_cache_metadata(
+            features_metadata,
+            feature_version=FeatureEngineer.FEATURE_VERSION,
+            source_fingerprint=source_fingerprint,
+            match_count=len(matches),
+        )
         print(f"Generated and cached {len(features)} features to {features_cache.name}")
 
     # Split train/test per league
@@ -647,9 +689,13 @@ Examples:
 
     if args.regenerate:
         cache_path = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
+        meta_path = cache_path.with_suffix(".meta.json")
         if cache_path.exists():
             cache_path.unlink()
             print(f"Deleted feature cache: {cache_path}")
+        if meta_path.exists():
+            meta_path.unlink()
+            print(f"Deleted feature cache metadata: {meta_path}")
 
     # Parse league filter
     league_filter = None

@@ -6,11 +6,13 @@ Core logic extracted from scripts/daily_picks.py for reuse in TUI and CLI.
 
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 # Team name mapping: NT name -> FootyStats name
 TEAM_NAME_MAP = {
@@ -137,7 +139,7 @@ class DailyPicksFinder:
     def convert_nt_probs_to_odds(self, match) -> Dict[str, float]:
         """Convert Norsk Tipping probabilities to decimal odds."""
         def prob_to_odds(prob):
-            if prob <= 0:
+            if prob is None or prob <= 0:
                 return 0
             return round(100 / prob, 2)
 
@@ -180,32 +182,57 @@ class DailyPicksFinder:
     def compute_features_for_match(
         self, home_team: str, away_team: str, match_date: datetime
     ) -> Optional[pd.DataFrame]:
-        """Compute features for an upcoming match using historical data."""
+        """Compute features for an upcoming match using the same feature engine as training."""
         if self.engineer is None or self.matches_df is None:
             return None
 
         date_unix = int(match_date.timestamp())
-        historical = self.matches_df[self.matches_df["date_unix"] < date_unix].copy()
 
-        if len(historical) == 0:
+        # Use engineer's pre-sorted matches (sorted by date_unix in FeatureEngineer.__init__)
+        hist = self.engineer.matches[self.engineer.matches["date_unix"] < date_unix]
+
+        if len(hist) == 0:
             return None
 
-        home_matches = historical[
-            (historical["home_team"] == home_team) | (historical["away_team"] == home_team)
-        ].tail(10)
+        # Look up team IDs from historical data (most recent occurrence)
+        home_as_home = hist[hist["home_team"] == home_team]
+        home_as_away = hist[hist["away_team"] == home_team]
+        away_as_home = hist[hist["home_team"] == away_team]
+        away_as_away = hist[hist["away_team"] == away_team]
 
-        away_matches = historical[
-            (historical["home_team"] == away_team) | (historical["away_team"] == away_team)
-        ].tail(10)
+        home_all = pd.concat([home_as_home, home_as_away])
+        away_all = pd.concat([away_as_home, away_as_away])
 
-        if len(home_matches) < 3 or len(away_matches) < 3:
+        if len(home_all) < 3 or len(away_all) < 3:
             return None
 
-        home_form = self._compute_form(home_matches, home_team)
-        away_form = self._compute_form(away_matches, away_team)
+        last_home = home_all.sort_values("date_unix").iloc[-1]
+        home_id = last_home["home_team_id"] if last_home["home_team"] == home_team else last_home["away_team_id"]
 
-        recent_all = historical.tail(500)
-        league_draw_rate = (recent_all["result"] == "D").mean() if len(recent_all) > 0 else 0.25
+        last_away = away_all.sort_values("date_unix").iloc[-1]
+        away_id = last_away["away_team_id"] if last_away["away_team"] == away_team else last_away["home_team_id"]
+
+        # Infer season_id and league_id from the most recent match for home team
+        season_id = last_home.get("season_id")
+        league_id = last_home.get("league_id")
+        if pd.isna(season_id):
+            season_id = None
+        if pd.isna(league_id):
+            league_id = None
+
+        # Use same FeatureEngineer methods as training
+        home_form = self.engineer._get_team_form(home_id, date_unix)
+        away_form = self.engineer._get_team_form(away_id, date_unix)
+
+        if home_form["matches_played"] < 3 or away_form["matches_played"] < 3:
+            return None
+
+        home_venue = self.engineer._get_home_away_strength(home_id, date_unix, is_home=True)
+        away_venue = self.engineer._get_home_away_strength(away_id, date_unix, is_home=False)
+        h2h = self.engineer._get_h2h_stats(home_id, away_id, date_unix)
+        home_pos = self.engineer._get_season_position(home_id, date_unix, season_id)
+        away_pos = self.engineer._get_season_position(away_id, date_unix, season_id)
+        league_draw_rate = self.engineer._get_league_draw_rate(league_id, date_unix)
 
         features = {
             "match_id": f"upcoming_{home_team}_{away_team}",
@@ -213,112 +240,58 @@ class DailyPicksFinder:
             "away_team": away_team,
             "game_week": 0,
             "date_unix": date_unix,
-            "home_form_ppg": home_form["ppg"],
-            "home_form_goals_for": home_form["goals_for"],
-            "home_form_goals_against": home_form["goals_against"],
-            "home_form_goal_diff": home_form["goal_diff"],
-            "home_form_xg": home_form.get("xg", 0),
-            "home_venue_ppg": home_form["venue_ppg"],
-            "home_venue_goals_for": home_form["venue_goals_for"],
-            "home_venue_goals_against": home_form["venue_goals_against"],
-            "home_position": home_form.get("position", 10),
-            "home_season_points": home_form.get("season_points", 0),
-            "home_season_gd": home_form.get("season_gd", 0),
-            "away_form_ppg": away_form["ppg"],
-            "away_form_goals_for": away_form["goals_for"],
-            "away_form_goals_against": away_form["goals_against"],
-            "away_form_goal_diff": away_form["goal_diff"],
-            "away_form_xg": away_form.get("xg", 0),
-            "away_venue_ppg": away_form["venue_ppg"],
-            "away_venue_goals_for": away_form["venue_goals_for"],
-            "away_venue_goals_against": away_form["venue_goals_against"],
-            "away_position": away_form.get("position", 10),
-            "away_season_points": away_form.get("season_points", 0),
-            "away_season_gd": away_form.get("season_gd", 0),
-            "form_ppg_diff": home_form["ppg"] - away_form["ppg"],
-            "position_diff": home_form.get("position", 10) - away_form.get("position", 10),
-            "xg_diff": home_form.get("xg", 0) - away_form.get("xg", 0),
+            "home_form_ppg": home_form["form_ppg"],
+            "home_form_goals_for": home_form["form_goals_for"],
+            "home_form_goals_against": home_form["form_goals_against"],
+            "home_form_goal_diff": home_form["form_goal_diff"],
+            "home_form_xg": home_form["form_xg"],
+            "home_venue_ppg": home_venue["venue_ppg"],
+            "home_venue_goals_for": home_venue["venue_goals_for"],
+            "home_venue_goals_against": home_venue["venue_goals_against"],
+            "home_position": home_pos["position"],
+            "home_season_points": home_pos["points"],
+            "home_season_gd": home_pos["goal_diff"],
+            "away_form_ppg": away_form["form_ppg"],
+            "away_form_goals_for": away_form["form_goals_for"],
+            "away_form_goals_against": away_form["form_goals_against"],
+            "away_form_goal_diff": away_form["form_goal_diff"],
+            "away_form_xg": away_form["form_xg"],
+            "away_venue_ppg": away_venue["venue_ppg"],
+            "away_venue_goals_for": away_venue["venue_goals_for"],
+            "away_venue_goals_against": away_venue["venue_goals_against"],
+            "away_position": away_pos["position"],
+            "away_season_points": away_pos["points"],
+            "away_season_gd": away_pos["goal_diff"],
+            "form_ppg_diff": home_form["form_ppg"] - away_form["form_ppg"],
+            # Consistent with training: away_pos - home_pos (positive = home better, lower number = higher rank)
+            "position_diff": away_pos["position"] - home_pos["position"],
+            "xg_diff": home_form["form_xg"] - away_form["form_xg"],
             "league_draw_rate": league_draw_rate,
-            "h2h_home_wins": 0,
-            "h2h_draws": 0,
-            "h2h_away_wins": 0,
-            "h2h_total_goals": 0,
-            "home_prematch_ppg": home_form["ppg"],
-            "away_prematch_ppg": away_form["ppg"],
-            "home_overall_ppg": home_form["ppg"],
-            "away_overall_ppg": away_form["ppg"],
-            "prematch_ppg_diff": home_form["ppg"] - away_form["ppg"],
-            "home_xg_prematch": home_form.get("xg", 1.3),
-            "away_xg_prematch": away_form.get("xg", 1.0),
-            "total_xg_prematch": home_form.get("xg", 1.3) + away_form.get("xg", 1.0),
-            "xg_prematch_diff": home_form.get("xg", 1.3) - away_form.get("xg", 1.0),
-            "home_attack_quality": 0.3,
-            "away_attack_quality": 0.3,
-            "fs_btts_potential": 50,
-            "fs_o25_potential": 50,
-            "fs_o35_potential": 30,
+            "h2h_home_wins": h2h["h2h_home_wins"],
+            "h2h_draws": h2h["h2h_draws"],
+            "h2h_away_wins": h2h["h2h_away_wins"],
+            "h2h_total_goals": h2h["h2h_home_goals"] + h2h["h2h_away_goals"],
+            "home_prematch_ppg": home_form["form_ppg"],
+            "away_prematch_ppg": away_form["form_ppg"],
+            "home_overall_ppg": home_form["form_ppg"],
+            "away_overall_ppg": away_form["form_ppg"],
+            "prematch_ppg_diff": home_form["form_ppg"] - away_form["form_ppg"],
+            "home_xg_prematch": home_form["form_xg"],
+            "away_xg_prematch": away_form["form_xg"],
+            "total_xg_prematch": home_form["form_xg"] + away_form["form_xg"],
+            "xg_prematch_diff": home_form["form_xg"] - away_form["form_xg"],
+            # Pre-match attack stats are not available for upcoming matches
+            "home_attack_quality": 0.0,
+            "away_attack_quality": 0.0,
+            "fs_btts_potential": 0,
+            "fs_o25_potential": 0,
+            "fs_o35_potential": 0,
             "target_result": "D",
             "target_over_25": 0,
             "target_btts": 0,
         }
 
         return pd.DataFrame([features])
-
-    def _compute_form(self, matches: pd.DataFrame, team: str) -> Dict:
-        """Compute form statistics for a team."""
-        if len(matches) == 0:
-            return {
-                "ppg": 1.0, "goals_for": 1.0, "goals_against": 1.0, "goal_diff": 0,
-                "xg": 1.0, "venue_ppg": 1.0, "venue_goals_for": 1.0, "venue_goals_against": 1.0,
-            }
-
-        points = []
-        goals_for = []
-        goals_against = []
-        xg_list = []
-        venue_points = []
-        venue_gf = []
-        venue_ga = []
-
-        for _, m in matches.iterrows():
-            is_home = m["home_team"] == team
-
-            if is_home:
-                gf = m["home_goals"] if pd.notna(m["home_goals"]) else 0
-                ga = m["away_goals"] if pd.notna(m["away_goals"]) else 0
-                xg = m["home_xg"] if pd.notna(m.get("home_xg")) else gf
-            else:
-                gf = m["away_goals"] if pd.notna(m["away_goals"]) else 0
-                ga = m["home_goals"] if pd.notna(m["home_goals"]) else 0
-                xg = m["away_xg"] if pd.notna(m.get("away_xg")) else gf
-
-            if gf > ga:
-                pts = 3
-            elif gf == ga:
-                pts = 1
-            else:
-                pts = 0
-
-            points.append(pts)
-            goals_for.append(gf)
-            goals_against.append(ga)
-            xg_list.append(xg)
-
-            if is_home:
-                venue_points.append(pts)
-                venue_gf.append(gf)
-                venue_ga.append(ga)
-
-        return {
-            "ppg": np.mean(points) if points else 1.0,
-            "goals_for": np.mean(goals_for) if goals_for else 1.0,
-            "goals_against": np.mean(goals_against) if goals_against else 1.0,
-            "goal_diff": np.mean(goals_for) - np.mean(goals_against) if goals_for else 0,
-            "xg": np.mean(xg_list) if xg_list else 1.0,
-            "venue_ppg": np.mean(venue_points) if venue_points else 1.0,
-            "venue_goals_for": np.mean(venue_gf) if venue_gf else 1.0,
-            "venue_goals_against": np.mean(venue_ga) if venue_ga else 1.0,
-        }
 
     def find_value_bets(self, matches: list) -> List[Dict]:
         """Find value bets using ML model for Draw and BTTS."""
@@ -387,8 +360,11 @@ class DailyPicksFinder:
                                 "source": "ML Model",
                             })
 
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(
+                            "Prediction failed for %s vs %s: %s",
+                            home_db, away_db, e, exc_info=True
+                        )
 
         def sort_key(p):
             if p["edge"] is not None:

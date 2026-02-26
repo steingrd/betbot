@@ -334,16 +334,16 @@ class DataProcessor:
         conn.close()
 
     def load_matches(self, season_id: Optional[int] = None) -> pd.DataFrame:
-        """Load matches from database"""
+        """Load matches from database, ordered chronologically."""
         conn = self._get_connection()
         if season_id:
             df = pd.read_sql_query(
-                "SELECT * FROM matches WHERE season_id = ?",
+                "SELECT * FROM matches WHERE season_id = ? ORDER BY date_unix",
                 conn,
                 params=[season_id]
             )
         else:
-            df = pd.read_sql_query("SELECT * FROM matches", conn)
+            df = pd.read_sql_query("SELECT * FROM matches ORDER BY date_unix", conn)
         conn.close()
         return df
 
