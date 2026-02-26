@@ -174,8 +174,34 @@ class DataProcessor:
         conn.commit()
         conn.close()
 
+    def delete_incomplete_matches(self, season_id: int = None) -> int:
+        """Delete unplayed matches that were saved before status filtering was added.
+
+        Identifies incomplete matches as: home_goals=0, away_goals=0, home_shots=-1.
+        Historical matches with real results (e.g. 2-1) but missing stats (home_shots=-1)
+        are preserved — only the fake 0-0 placeholder rows are removed.
+
+        Returns the number of deleted rows.
+        """
+        condition = "home_goals = 0 AND away_goals = 0 AND home_shots = -1"
+        conn = self._get_connection()
+        if season_id:
+            cursor = conn.execute(
+                f"DELETE FROM matches WHERE {condition} AND season_id = ?",
+                (season_id,)
+            )
+        else:
+            cursor = conn.execute(f"DELETE FROM matches WHERE {condition}")
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted
+
     def process_matches(self, matches_data: list, season_id: int, league_id: int = None) -> pd.DataFrame:
         """Convert raw match data to DataFrame
+
+        Only includes completed matches (status == "complete"). Incomplete/future
+        matches from FootyStats are skipped.
 
         Args:
             matches_data: Raw match data from API
@@ -185,6 +211,9 @@ class DataProcessor:
 
         records = []
         for m in matches_data:
+            # Skip unplayed/incomplete matches
+            if m.get("status") != "complete":
+                continue
             # Determine result
             home_goals = m.get("homeGoalCount", 0)
             away_goals = m.get("awayGoalCount", 0)

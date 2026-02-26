@@ -194,6 +194,9 @@ def main(full: bool = False):
                 print(f"{progress} {season['country']} {season['league_name']} {season['year']}: No matches")
                 continue
 
+            # Remove any previously saved incomplete matches for this season
+            processor.delete_incomplete_matches(season_id=season_id)
+
             # Process and save with league_id (upsert updates existing matches)
             df = processor.process_matches(matches, season_id, league_id=league_id)
             processor.save_matches(df)

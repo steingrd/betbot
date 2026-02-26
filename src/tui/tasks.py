@@ -241,6 +241,9 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
         if not matches:
             return DownloadResult(task=task, match_count=0)
 
+        # Remove any previously saved incomplete matches for this season
+        processor.delete_incomplete_matches(season_id=task.season_id)
+
         # Process and save (upsert updates existing matches)
         df = processor.process_matches(matches, task.season_id, league_id=task.league_id)
         processor.save_matches(df)

@@ -140,7 +140,7 @@ class BetBotApp(App):
                        m.home_team, m.home_goals, m.away_goals, m.away_team
                 FROM matches m
                 LEFT JOIN seasons s ON m.season_id = s.id
-                WHERE m.home_shots IS NOT NULL
+                WHERE m.home_shots >= 0
                 ORDER BY m.date_unix DESC
                 LIMIT 20
             """).fetchall()
