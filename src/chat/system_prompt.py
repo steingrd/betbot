@@ -126,9 +126,18 @@ def _format_predictions(predictions: list[dict]) -> str:
         confidence = p.get("confidence", "?")
         kickoff = p.get("kickoff", "")
         league = p.get("league", "")
+        model_prob = p.get("model_prob")
+        model_str = f"{model_prob:.1%}" if model_prob is not None else "?"
+        odds_draw = p.get("odds_draw")
+        odds_home = p.get("odds_home")
+        odds_away = p.get("odds_away")
+        odds_str = ""
+        if odds_home and odds_draw and odds_away:
+            odds_str = f" Odds: H={odds_home} D={odds_draw} A={odds_away}."
 
         lines.append(
-            f"- {kickoff} {home} vs {away} ({league}): {market}, edge {edge_str}, {confidence}"
+            f"- {kickoff} {home} vs {away} ({league}): {market}, "
+            f"modell={model_str}, edge {edge_str}, {confidence}.{odds_str}"
         )
 
     return "\n".join(lines)

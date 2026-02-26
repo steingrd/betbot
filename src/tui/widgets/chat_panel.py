@@ -259,8 +259,8 @@ class ChatPanel(Widget):
             return
 
         lines = ["**Value Bets**", ""]
-        lines.append("| Kamp | Market | Edge | Konf. |")
-        lines.append("|------|--------|------|-------|")
+        lines.append("| Tid | Kamp | Market | Edge | Odds | Konf. |")
+        lines.append("|-----|------|--------|------|------|-------|")
         for p in picks:
             home = p.get("home_team", "?")
             away = p.get("away_team", "?")
@@ -268,7 +268,10 @@ class ChatPanel(Widget):
             edge = p.get("edge")
             edge_str = f"{edge:.1%}" if edge is not None else "-"
             conf = p.get("confidence", "-")
-            lines.append(f"| {home} - {away} | {market} | {edge_str} | {conf} |")
+            kickoff = p.get("kickoff", "")
+            odds_draw = p.get("odds_draw")
+            odds_str = f"{odds_draw}" if odds_draw and market == "Draw" else "-"
+            lines.append(f"| {kickoff} | {home} - {away} | {market} | {edge_str} | {odds_str} | {conf} |")
 
         md = "\n".join(lines)
         container = self.query_one("#chat-messages", VerticalScroll)
