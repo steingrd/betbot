@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# BetBot TUI launcher
+# BetBot launcher - TUI or Web UI
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -16,4 +16,10 @@ elif [ -z "$VIRTUAL_ENV" ]; then
     source .venv/bin/activate
 fi
 
-exec python scripts/run_tui.py "$@"
+if [ "$1" = "--web" ]; then
+    shift
+    echo "Starting BetBot Web UI on http://localhost:8000"
+    exec python scripts/run_web.py "$@"
+else
+    exec python scripts/run_tui.py "$@"
+fi

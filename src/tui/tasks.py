@@ -1,4 +1,10 @@
-"""TaskQueue - FIFO task queue with background download/training integration."""
+"""TaskQueue - FIFO task queue with background download/training integration.
+
+Business logic functions (run_download, run_training, run_predictions) use
+generic callbacks so they can be driven by both the TUI (Textual) and the
+Web API (FastAPI).  The Textual Message subclasses are kept for TUI
+compatibility and also serve as plain dataclasses for the API layer.
+"""
 
 from __future__ import annotations
 
@@ -12,11 +18,20 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional, Protocol
 
 import numpy as np
 import pandas as pd
 from textual.message import Message
+
+
+# --- Callback protocol ---
+
+ProgressCallback = Callable[[Any], None]
+"""Signature: on_progress(event) where event is one of the Message dataclasses below."""
+
+CancelledCheck = Callable[[], bool]
+"""Signature: is_cancelled() -> bool"""
 
 
 @dataclass
@@ -45,6 +60,7 @@ class DownloadResult:
 
 
 # --- Textual Messages for thread-safe UI updates ---
+# These also serve as plain event objects for the API layer.
 
 
 class DownloadProgress(Message):
@@ -320,16 +336,13 @@ class PredictionError(Message):
         super().__init__()
 
 
-def run_predictions(app, worker) -> None:
-    """Run prediction pipeline in a worker thread.
+def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
+    """Run prediction pipeline.
 
     Loads model, fetches NT matches, computes features, predicts, finds value bets.
-
-    Args:
-        app: The BetBotApp instance (for posting messages)
-        worker: The current worker (for cancellation checks)
+    Uses generic callbacks so it can be driven by TUI or API.
     """
-    app.post_message(PredictionProgress(step="Laster modell", detail="Laster ML-modell og historisk data..."))
+    on_progress(PredictionProgress(step="Laster modell", detail="Laster ML-modell og historisk data..."))
 
     try:
         from src.predictions.daily_picks import DailyPicksFinder
@@ -337,13 +350,13 @@ def run_predictions(app, worker) -> None:
         finder = DailyPicksFinder()
         finder.load_model()
     except Exception as e:
-        app.post_message(PredictionError(f"Kunne ikke laste modell: {e}"))
+        on_progress(PredictionError(f"Kunne ikke laste modell: {e}"))
         return
 
     match_count = len(finder.matches_df) if finder.matches_df is not None else 0
-    app.post_message(PredictionProgress(step="Laster modell", detail=f"Modell lastet ({match_count:,} kamper)"))
+    on_progress(PredictionProgress(step="Laster modell", detail=f"Modell lastet ({match_count:,} kamper)"))
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Check for stale data
@@ -352,45 +365,45 @@ def run_predictions(app, worker) -> None:
         latest_unix = finder.matches_df["date_unix"].max()
         days_old = (time.time() - latest_unix) / 86400
         if days_old > 30:
-            stale_warning = f"Data er {int(days_old)} dager gammel - kjor Ctrl+D for a oppdatere"
+            stale_warning = f"Data er {int(days_old)} dager gammel - kjor /download for a oppdatere"
 
     # Fetch upcoming matches from Norsk Tipping
-    app.post_message(PredictionProgress(step="Henter kamper", detail="Henter kamper fra Norsk Tipping..."))
+    on_progress(PredictionProgress(step="Henter kamper", detail="Henter kamper fra Norsk Tipping..."))
 
     try:
         matches = finder.get_upcoming_matches()
     except Exception as e:
-        app.post_message(PredictionError(f"Kunne ikke hente kamper: {e}"))
+        on_progress(PredictionError(f"Kunne ikke hente kamper: {e}"))
         return
 
     if not matches:
-        app.post_message(PredictionFinished(picks=[], match_count=0, stale_warning=stale_warning))
+        on_progress(PredictionFinished(picks=[], match_count=0, stale_warning=stale_warning))
         return
 
-    app.post_message(
+    on_progress(
         PredictionProgress(step="Henter kamper", detail=f"Fant {len(matches)} kamper fra Norsk Tipping")
     )
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Find value bets
-    app.post_message(PredictionProgress(step="Analyserer", detail=f"Analyserer {len(matches)} kamper..."))
+    on_progress(PredictionProgress(step="Analyserer", detail=f"Analyserer {len(matches)} kamper..."))
 
     try:
         picks = finder.find_value_bets(matches)
     except Exception as e:
-        app.post_message(PredictionError(f"Feil under analyse: {e}"))
+        on_progress(PredictionError(f"Feil under analyse: {e}"))
         return
 
-    app.post_message(PredictionFinished(picks=picks, match_count=len(matches), stale_warning=stale_warning))
+    on_progress(PredictionFinished(picks=picks, match_count=len(matches), stale_warning=stale_warning))
 
 
 class _ProgressWriter(io.TextIOBase):
     """StringIO replacement that posts TrainingProgress for each line written by print()."""
 
-    def __init__(self, app, step: str):
-        self._app = app
+    def __init__(self, on_progress: ProgressCallback, step: str):
+        self._on_progress = on_progress
         self._step = step
         self._buffer = ""
 
@@ -400,19 +413,17 @@ class _ProgressWriter(io.TextIOBase):
             line, self._buffer = self._buffer.split("\n", 1)
             line = line.strip()
             if line:
-                self._app.post_message(TrainingProgress(step=self._step, detail=line))
+                self._on_progress(TrainingProgress(step=self._step, detail=line))
         return len(s)
 
     def flush(self) -> None:
         pass
 
 
-def run_training(app, worker) -> None:
-    """Run feature engineering + model training in a worker thread.
+def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
+    """Run feature engineering + model training.
 
-    Args:
-        app: The BetBotApp instance (for posting messages and call_from_thread)
-        worker: The current worker (for cancellation checks)
+    Uses generic callbacks so it can be driven by TUI or API.
     """
     from src.data.data_processor import DataProcessor
     from src.features.cache_metadata import (
@@ -440,30 +451,30 @@ def run_training(app, worker) -> None:
     }
 
     # Step 1: Load matches
-    app.post_message(TrainingProgress(step="Laster data", detail="Laster kamper fra database...", percent=0))
+    on_progress(TrainingProgress(step="Laster data", detail="Laster kamper fra database...", percent=0))
 
     processor = DataProcessor()
     try:
         matches = processor.load_matches()
     except Exception as e:
-        app.post_message(TrainingError(f"Kunne ikke laste data: {e}"))
+        on_progress(TrainingError(f"Kunne ikke laste data: {e}"))
         return
 
     if len(matches) == 0:
-        app.post_message(TrainingError("Ingen kamper i databasen - last ned data først (Ctrl+D)"))
+        on_progress(TrainingError("Ingen kamper i databasen - last ned data forst (/download)"))
         return
 
     step_elapsed = time.time() - start_time
     report["steps"]["load_matches"] = {"duration_seconds": step_elapsed, "matches_loaded": len(matches)}
     report["data_stats"]["total_matches"] = len(matches)
 
-    app.post_message(TrainingProgress(step="Laster data", detail=f"Lastet {len(matches):,} kamper", percent=5))
+    on_progress(TrainingProgress(step="Laster data", detail=f"Lastet {len(matches):,} kamper", percent=5))
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Step 2: Generate features (incremental - reuse cached features)
-    app.post_message(TrainingProgress(step="Features", detail="Genererer features...", percent=5))
+    on_progress(TrainingProgress(step="Features", detail="Genererer features...", percent=5))
 
     step_start = time.time()
 
@@ -488,7 +499,7 @@ def run_training(app, worker) -> None:
                 if expected_cols.issubset(set(cached_df.columns)):
                     skip_ids = set(cached_df["match_id"].tolist())
                     new_match_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
-                    app.post_message(
+                    on_progress(
                         TrainingProgress(
                             step="Features",
                             detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
@@ -498,7 +509,7 @@ def run_training(app, worker) -> None:
                 else:
                     cached_df = None  # Column mismatch - regenerate all
             else:
-                app.post_message(
+                on_progress(
                     TrainingProgress(
                         step="Features",
                         detail=f"Cache invalidert ({reason})",
@@ -512,7 +523,7 @@ def run_training(app, worker) -> None:
 
     def feature_progress(current, total):
         pct = 5 + int((current / total) * 70)  # 5-75%
-        app.post_message(
+        on_progress(
             TrainingProgress(step="Features", detail=f"{current:,}/{total:,} kamper", percent=pct)
         )
 
@@ -540,16 +551,16 @@ def run_training(app, worker) -> None:
     }
     report["data_stats"]["features_generated"] = len(features_df)
 
-    app.post_message(
+    on_progress(
         TrainingProgress(step="Features", detail=f"Genererte {len(features_df):,} feature-rader ({len(new_features_df):,} nye)", percent=75)
     )
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Step 3: Check minimum data
     if len(features_df) < 100:
-        app.post_message(
+        on_progress(
             TrainingError(f"For lite data for trening ({len(features_df)} rader, trenger minst 100)")
         )
         return
@@ -564,16 +575,16 @@ def run_training(app, worker) -> None:
         match_count=len(matches),
     )
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Step 4: Train models (capture stdout from MatchPredictor.train())
-    app.post_message(TrainingProgress(step="Trening", detail="Trener ML-modeller...", percent=78))
+    on_progress(TrainingProgress(step="Trening", detail="Trener ML-modeller...", percent=78))
 
     step_start = time.time()
     predictor = MatchPredictor()
 
-    progress_writer = _ProgressWriter(app, step="Trening")
+    progress_writer = _ProgressWriter(on_progress, step="Trening")
     with contextlib.redirect_stdout(progress_writer):
         results = predictor.train(features_df)
 
@@ -595,13 +606,13 @@ def run_training(app, worker) -> None:
         },
     }
 
-    app.post_message(TrainingProgress(step="Trening", detail="Modeller trent", percent=92))
+    on_progress(TrainingProgress(step="Trening", detail="Modeller trent", percent=92))
 
-    if worker.is_cancelled:
+    if is_cancelled():
         return
 
     # Step 5: Save models
-    app.post_message(TrainingProgress(step="Lagrer", detail="Lagrer modeller...", percent=93))
+    on_progress(TrainingProgress(step="Lagrer", detail="Lagrer modeller...", percent=93))
 
     step_start = time.time()
     model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -636,5 +647,62 @@ def run_training(app, worker) -> None:
     total_elapsed = time.time() - start_time
     report["total_duration_seconds"] = total_elapsed
 
-    app.post_message(TrainingProgress(step="Ferdig", detail="Trening fullført", percent=100))
-    app.post_message(TrainingFinished(report=report))
+    on_progress(TrainingProgress(step="Ferdig", detail="Trening fullfort", percent=100))
+    on_progress(TrainingFinished(report=report))
+
+
+def run_download(
+    on_progress: ProgressCallback,
+    is_cancelled: CancelledCheck,
+    full: bool = False,
+) -> None:
+    """Run download pipeline. Uses generic callbacks.
+
+    Downloads league data from FootyStats, skipping finished seasons unless full=True.
+    """
+    import os
+
+    api_key = os.getenv("FOOTYSTATS_API_KEY", "")
+    if not api_key or api_key == "example":
+        on_progress(DownloadError("FOOTYSTATS_API_KEY ikke satt i .env"))
+        return
+
+    from src.data.data_processor import DataProcessor
+    from src.data.footystats_client import FootyStatsClient
+
+    client = FootyStatsClient(api_key=api_key)
+    processor = DataProcessor()
+    processor.init_database()
+    enable_wal_mode(processor.db_path)
+
+    if not client.test_connection():
+        on_progress(DownloadError("Kunne ikke koble til FootyStats API"))
+        return
+
+    tasks = build_download_queue(client)
+    if not tasks:
+        on_progress(DownloadError("Ingen ligaer funnet - velg ligaer paa FootyStats forst"))
+        return
+
+    # Filter out finished seasons unless full download requested
+    skipped_results: list[DownloadResult] = []
+    if not full:
+        tasks, skipped_tasks = filter_download_queue(tasks, processor)
+        skipped_results = [DownloadResult(task=t, skipped=True) for t in skipped_tasks]
+
+    if not tasks:
+        on_progress(DownloadFinished(results=skipped_results))
+        return
+
+    results: list[DownloadResult] = list(skipped_results)
+
+    for i, task in enumerate(tasks):
+        if is_cancelled():
+            break
+
+        result = run_download_task(task, client, processor)
+        results.append(result)
+
+        on_progress(DownloadProgress(result=result, completed=i + 1, total=len(tasks)))
+
+    on_progress(DownloadFinished(results=results))
