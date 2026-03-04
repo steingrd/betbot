@@ -120,22 +120,24 @@ class ValueBetFinder:
             DataFrame of value bets
         """
 
-        # Merge predictions with odds
-        merged = predictions.merge(
-            features[["match_id", "odds_home", "odds_draw", "odds_away",
-                     "odds_over_25", "odds_btts_yes", "target_result",
-                     "target_over_25", "target_btts"]],
-            on="match_id"
-        )
+        # Merge predictions with odds and match info from features
+        feature_cols = ["match_id", "odds_home", "odds_draw", "odds_away",
+                       "odds_over_25", "odds_btts_yes", "target_result",
+                       "target_over_25", "target_btts"]
+        # Add match info columns if available in features but not in predictions
+        for col in ["home_team", "away_team", "game_week"]:
+            if col in features.columns and col not in predictions.columns:
+                feature_cols.append(col)
+        merged = predictions.merge(features[feature_cols], on="match_id")
 
         value_bets = []
 
         for _, row in merged.iterrows():
             match_info = {
                 "match_id": row["match_id"],
-                "home_team": row["home_team"],
-                "away_team": row["away_team"],
-                "game_week": row["game_week"],
+                "home_team": row.get("home_team", ""),
+                "away_team": row.get("away_team", ""),
+                "game_week": row.get("game_week", ""),
             }
 
             # Normalize 1X2 implied probabilities to remove overround

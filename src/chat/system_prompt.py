@@ -122,12 +122,12 @@ def _format_predictions(predictions: list[dict]) -> str:
         away = p.get("away_team", "?")
         market = p.get("market", "?")
         edge = p.get("edge")
-        edge_str = f"{edge:.1%}" if edge is not None else "?"
+        edge_str = f"{float(edge):.1%}" if edge is not None else "?"
         confidence = p.get("confidence", "?")
         kickoff = p.get("kickoff", "")
         league = p.get("league", "")
         model_prob = p.get("model_prob")
-        model_str = f"{model_prob:.1%}" if model_prob is not None else "?"
+        model_str = f"{float(model_prob):.1%}" if model_prob is not None else "?"
         odds_draw = p.get("odds_draw")
         odds_home = p.get("odds_home")
         odds_away = p.get("odds_away")

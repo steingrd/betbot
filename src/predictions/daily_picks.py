@@ -94,7 +94,7 @@ TEAM_NAME_MAP = {
 
 
 class DailyPicksFinder:
-    """Find daily value bet picks using ML model for Draw and BTTS."""
+    """Find daily value bet picks using multi-strategy consensus."""
 
     def __init__(self, min_edge: float = 0.05, min_odds: float = 1.5, max_odds: float = 10.0):
         self.min_edge = min_edge
@@ -108,27 +108,40 @@ class DailyPicksFinder:
 
         self.nt_client = NorskTippingClient()
         self.processor = DataProcessor()
-        self.predictor: Optional[MatchPredictor] = None
         self.engineer: Optional[FeatureEngineer] = None
         self.matches_df: Optional[pd.DataFrame] = None
+        self.matches_with_league: Optional[pd.DataFrame] = None
         self.seasons_df: Optional[pd.DataFrame] = None
         self.value_finder = ValueBetFinder(min_edge, min_odds, max_odds)
+        self._strategies: list = []
 
     def load_model(self) -> bool:
-        """Load the trained model and historical data."""
+        """Load all trained strategy models and historical data."""
         try:
-            from src.features.feature_engineering import FeatureEngineer
-            from src.models.match_predictor import MatchPredictor
+            from pathlib import Path
 
-            self.predictor = MatchPredictor()
-            self.predictor.load()
+            from src.features.feature_engineering import FeatureEngineer
+            from src.strategies import STRATEGIES
 
             self.matches_df = self.processor.load_matches()
+            self.matches_with_league = self.processor.load_matches_with_league()
             self.seasons_df = self.processor.load_seasons()
             self.engineer = FeatureEngineer(self.matches_df)
-            return True
+
+            # Load all strategies
+            models_dir = Path(__file__).parent.parent.parent / "models"
+            self._strategies = []
+            for strategy in STRATEGIES:
+                ext = "json" if strategy.slug in ("poisson", "elo") else "pkl"
+                model_path = models_dir / f"{strategy.slug}.{ext}"
+                if strategy.load(model_path):
+                    self._strategies.append(strategy)
+                    logger.info("Loaded strategy: %s", strategy.name)
+
+            logger.info("Loaded %d/%d strategies", len(self._strategies), len(STRATEGIES))
+            return len(self._strategies) > 0
         except Exception as e:
-            raise RuntimeError(f"Could not load model: {e}") from e
+            raise RuntimeError(f"Could not load models: {e}") from e
 
     def get_upcoming_matches(self, target_date: Optional[date] = None) -> list:
         """Get upcoming matches from Norsk Tipping."""
@@ -293,83 +306,316 @@ class DailyPicksFinder:
 
         return pd.DataFrame([features])
 
-    def find_value_bets(self, matches: list) -> List[Dict]:
-        """Find value bets using ML model for Draw and BTTS."""
-        if not self.predictor or not self.predictor.is_fitted:
+    def _run_strategies_on_matches(self, matches: list) -> List[Dict]:
+        """Run all strategies on NT matches. Returns raw data per match.
+
+        Each entry contains: home_team, away_team, home_db, away_db, league,
+        kickoff, odds, features, strategy_predictions, strategy_names.
+        """
+        if not self._strategies:
             return []
 
-        picks = []
+        match_data = []
 
         for match in matches:
             home_db = self.find_team_in_db(match.home_team)
             away_db = self.find_team_in_db(match.away_team)
 
-            match_info = {
-                "home_team": match.home_team,
-                "away_team": match.away_team,
-                "home_team_db": home_db,
-                "away_team_db": away_db,
-                "league": match.league,
-                "kickoff": match.kickoff.strftime("%H:%M") if match.kickoff else "--:--",
-                "nt_home_prob": match.home_win_probability,
-                "nt_draw_prob": match.draw_probability,
-                "nt_away_prob": match.away_win_probability,
-            }
+            if not home_db or not away_db:
+                continue
+
+            features = self.compute_features_for_match(home_db, away_db, match.kickoff)
+            if features is None:
+                continue
 
             odds = self.convert_nt_probs_to_odds(match)
-            match_info.update(odds)
+            kickoff_str = match.kickoff.strftime("%d.%m %H:%M") if match.kickoff else "--:--"
 
-            if home_db and away_db:
-                features = self.compute_features_for_match(home_db, away_db, match.kickoff)
+            # Build a fake matches_df for strategies that need it
+            match_df = pd.DataFrame([{
+                "match_id": features["match_id"].iloc[0],
+                "home_team": home_db,
+                "away_team": away_db,
+                "league_name": match.league or "",
+            }])
 
-                if features is not None:
-                    try:
-                        predictions = self.predictor.predict(features)
+            # Run each strategy
+            strategy_predictions = {}
+            strategy_names = {}
+            for strategy in self._strategies:
+                try:
+                    preds = strategy.predict(match_df, features)
+                    strategy_predictions[strategy.slug] = preds
+                    strategy_names[strategy.slug] = strategy.name
+                except Exception as e:
+                    logger.warning(
+                        "%s prediction failed for %s vs %s: %s",
+                        strategy.name, home_db, away_db, e
+                    )
 
-                        model_draw = predictions["prob_D"].iloc[0]
-                        model_btts = predictions["prob_btts"].iloc[0]
+            if not strategy_predictions:
+                continue
 
-                        nt_draw_implied = match.draw_probability / 100 if match.draw_probability else 0
+            match_data.append({
+                "home_team": match.home_team,
+                "away_team": match.away_team,
+                "home_db": home_db,
+                "away_db": away_db,
+                "league": match.league,
+                "kickoff": kickoff_str,
+                "odds": odds,
+                "features": features,
+                "strategy_predictions": strategy_predictions,
+                "strategy_names": strategy_names,
+            })
 
-                        draw_edge = model_draw - nt_draw_implied
-                        draw_odds = odds["odds_draw"]
-                        if (
-                            draw_edge >= self.min_edge
-                            and draw_odds >= self.min_odds
-                            and draw_odds <= self.max_odds
-                        ):
-                            confidence = "High" if draw_edge >= 0.10 else "Medium" if draw_edge >= 0.07 else "Low"
-                            picks.append({
-                                **match_info,
-                                "market": "Draw",
-                                "model_prob": model_draw,
-                                "implied_prob": nt_draw_implied,
-                                "edge": draw_edge,
-                                "confidence": confidence,
-                                "source": "ML Model",
-                            })
+        return match_data
 
-                        if model_btts >= 0.55:
-                            picks.append({
-                                **match_info,
-                                "market": "BTTS",
-                                "model_prob": model_btts,
-                                "implied_prob": None,
-                                "edge": None,
-                                "confidence": "High" if model_btts >= 0.65 else "Medium",
-                                "source": "ML Model",
-                            })
+    def find_value_bets(self, match_data: List[Dict]) -> List[Dict]:
+        """Find value bets using multi-strategy consensus.
 
-                    except Exception as e:
-                        logger.warning(
-                            "Prediction failed for %s vs %s: %s",
-                            home_db, away_db, e, exc_info=True
-                        )
+        Args:
+            match_data: Output from _run_strategies_on_matches().
 
-        def sort_key(p):
-            if p["edge"] is not None:
-                return (0, -p["edge"])
-            return (1, -p["model_prob"])
+        Returns consensus bets with per-strategy signal info so the UI
+        can filter by threshold.
+        """
+        from src.strategies.consensus import ConsensusEngine
 
-        picks.sort(key=sort_key)
+        picks = []
+
+        for md in match_data:
+            odds = md["odds"]
+            features = md["features"]
+
+            # Build odds DataFrame for ConsensusEngine
+            odds_row = {
+                "match_id": features["match_id"].iloc[0],
+                "home_team": md["home_team"],
+                "away_team": md["away_team"],
+                "league_name": md["league"] or "",
+                "kickoff": md["kickoff"],
+                "odds_home": odds["odds_home"],
+                "odds_draw": odds["odds_draw"],
+                "odds_away": odds["odds_away"],
+                "odds_over_25": 0,  # NT doesn't provide these
+                "odds_btts_yes": 0,
+            }
+            odds_df = pd.DataFrame([odds_row])
+
+            # Find consensus bets
+            engine = ConsensusEngine()
+            consensus_bets = engine.find_consensus_bets(
+                md["strategy_predictions"], md["strategy_names"], odds_df, min_edge=self.min_edge
+            )
+
+            for bet in consensus_bets:
+                # Skip markets without proper odds from NT
+                if bet.market in ("Over 2.5", "BTTS") and bet.odds <= 0:
+                    continue
+
+                avg_prob = sum(s.model_prob for s in bet.signals if s.is_value) / max(
+                    sum(1 for s in bet.signals if s.is_value), 1
+                )
+                avg_edge = avg_prob - bet.implied_prob
+
+                confidence = "High" if bet.consensus_count >= 3 else "Medium" if bet.consensus_count >= 2 else "Low"
+
+                picks.append({
+                    "home_team": md["home_team"],
+                    "away_team": md["away_team"],
+                    "home_team_db": md["home_db"],
+                    "away_team_db": md["away_db"],
+                    "league": md["league"],
+                    "kickoff": md["kickoff"],
+                    "market": bet.market,
+                    "model_prob": round(avg_prob, 4),
+                    "implied_prob": bet.implied_prob,
+                    "edge": round(avg_edge, 4),
+                    "confidence": confidence,
+                    "odds_home": odds["odds_home"],
+                    "odds_draw": odds["odds_draw"],
+                    "odds_away": odds["odds_away"],
+                    "consensus_count": bet.consensus_count,
+                    "total_strategies": bet.total_strategies,
+                    "signals": [
+                        {
+                            "strategy": s.strategy_name,
+                            "prob": round(s.model_prob, 4),
+                            "edge": round(s.edge, 4),
+                            "is_value": s.is_value,
+                        }
+                        for s in bet.signals
+                    ],
+                })
+
+        picks.sort(key=lambda p: (-p["consensus_count"], -(p["edge"] or 0)))
+        return picks
+
+    def find_safe_picks(self, match_data: List[Dict], min_prob: float = 0.60) -> List[Dict]:
+        """Find the most probable 1X2 outcomes regardless of value/edge.
+
+        Useful for accumulator bets where you want high-confidence picks.
+
+        Args:
+            match_data: Output from _run_strategies_on_matches().
+            min_prob: Minimum average probability across strategies.
+
+        Returns list sorted by descending avg_prob.
+        """
+        import math
+
+        picks = []
+
+        for md in match_data:
+            odds = md["odds"]
+
+            # Collect 1X2 probabilities from all strategies
+            outcomes = {}  # outcome -> list of probs
+            for slug, preds_df in md["strategy_predictions"].items():
+                if preds_df.empty:
+                    continue
+                row = preds_df.iloc[0]
+                for outcome, col in [("H", "prob_H"), ("D", "prob_D"), ("A", "prob_A")]:
+                    prob = float(row.get(col, float("nan")))
+                    if not math.isnan(prob):
+                        outcomes.setdefault(outcome, []).append((slug, prob))
+
+            if not outcomes:
+                continue
+
+            # Find best outcome by average probability
+            best_outcome = None
+            best_avg = 0.0
+            best_probs = []
+
+            for outcome, strat_probs in outcomes.items():
+                avg = sum(p for _, p in strat_probs) / len(strat_probs)
+                if avg > best_avg:
+                    best_avg = avg
+                    best_outcome = outcome
+                    best_probs = strat_probs
+
+            if best_outcome is None or best_avg < min_prob:
+                continue
+
+            # Map outcome to label and odds
+            outcome_map = {"H": ("Hjemmeseier", odds["odds_home"]),
+                           "D": ("Uavgjort", odds["odds_draw"]),
+                           "A": ("Borteseier", odds["odds_away"])}
+            label, outcome_odds = outcome_map[best_outcome]
+
+            picks.append({
+                "home_team": md["home_team"],
+                "away_team": md["away_team"],
+                "league": md["league"],
+                "kickoff": md["kickoff"],
+                "predicted_outcome": label,
+                "avg_prob": round(best_avg, 4),
+                "consensus_count": len(best_probs),
+                "total_strategies": len(md["strategy_predictions"]),
+                "odds": round(outcome_odds, 2) if outcome_odds else None,
+                "strategy_probs": {slug: round(p, 4) for slug, p in best_probs},
+            })
+
+        picks.sort(key=lambda p: -p["avg_prob"])
+        return picks
+
+    def generate_accumulators(self, safe_picks: List[Dict], sizes: List[int] | None = None) -> List[Dict]:
+        """Generate accumulator combinations from safe picks.
+
+        Takes the top N picks for each size and computes combined odds.
+
+        Args:
+            safe_picks: Output from find_safe_picks(), sorted by avg_prob desc.
+            sizes: List of accumulator sizes to generate. Default [4, 6, 8].
+
+        Returns list of accumulators with combined odds.
+        """
+        if sizes is None:
+            sizes = [4, 6, 8]
+
+        if not safe_picks:
+            return []
+
+        accumulators = []
+        for size in sizes:
+            if len(safe_picks) < size:
+                continue
+
+            top_picks = safe_picks[:size]
+
+            # Only include if all picks have valid odds
+            if not all(p.get("odds") and p["odds"] > 0 for p in top_picks):
+                continue
+
+            combined_odds = 1.0
+            for p in top_picks:
+                combined_odds *= p["odds"]
+
+            probs = [p["avg_prob"] for p in top_picks]
+
+            accumulators.append({
+                "size": size,
+                "combined_odds": round(combined_odds, 2),
+                "min_prob": round(min(probs), 4),
+                "avg_prob": round(sum(probs) / len(probs), 4),
+                "picks": top_picks,
+            })
+
+        return accumulators
+
+    def find_confident_goals(self, match_data: List[Dict], min_prob: float = 0.55) -> List[Dict]:
+        """Find matches where the model is confident about BTTS or Over 2.5.
+
+        Uses XGBoost, Poisson, and LogReg (not Elo, which only supports 1X2).
+        NT doesn't provide odds for these markets, so we only show probability.
+
+        Args:
+            match_data: Output from _run_strategies_on_matches().
+            min_prob: Minimum average probability across strategies.
+
+        Returns list sorted by descending avg_prob.
+        """
+        import math
+
+        picks = []
+
+        for md in match_data:
+            for market, prob_col in [("Over 2.5", "prob_over25"), ("BTTS", "prob_btts")]:
+                strat_probs = []
+
+                for slug, preds_df in md["strategy_predictions"].items():
+                    # Skip Elo — only supports 1X2
+                    if slug == "elo":
+                        continue
+                    if preds_df.empty:
+                        continue
+                    row = preds_df.iloc[0]
+                    prob = float(row.get(prob_col, float("nan")))
+                    if not math.isnan(prob):
+                        strat_probs.append((slug, prob))
+
+                if not strat_probs:
+                    continue
+
+                avg_prob = sum(p for _, p in strat_probs) / len(strat_probs)
+                consensus = sum(1 for _, p in strat_probs if p >= min_prob)
+
+                if avg_prob < min_prob:
+                    continue
+
+                picks.append({
+                    "home_team": md["home_team"],
+                    "away_team": md["away_team"],
+                    "league": md["league"],
+                    "kickoff": md["kickoff"],
+                    "market": market,
+                    "avg_prob": round(avg_prob, 4),
+                    "consensus_count": consensus,
+                    "total_strategies": len(strat_probs),
+                    "strategy_probs": {slug: round(p, 4) for slug, p in strat_probs},
+                })
+
+        picks.sort(key=lambda p: -p["avg_prob"])
         return picks

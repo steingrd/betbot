@@ -25,6 +25,13 @@ class MatchResult(BaseModel):
     away_team: str
 
 
+class StrategySignalResponse(BaseModel):
+    strategy: str
+    prob: float
+    edge: float
+    is_value: bool
+
+
 class Prediction(BaseModel):
     home_team: str
     away_team: str
@@ -37,6 +44,49 @@ class Prediction(BaseModel):
     odds_home: float | None
     odds_draw: float | None
     odds_away: float | None
+    consensus_count: int | None = None
+    total_strategies: int | None = None
+    signals: list[StrategySignalResponse] | None = None
+
+
+class SafePick(BaseModel):
+    home_team: str
+    away_team: str
+    league: str | None
+    kickoff: str
+    predicted_outcome: str
+    avg_prob: float
+    consensus_count: int
+    total_strategies: int
+    odds: float | None
+    strategy_probs: dict[str, float]
+
+
+class Accumulator(BaseModel):
+    size: int
+    combined_odds: float
+    min_prob: float
+    avg_prob: float
+    picks: list[SafePick]
+
+
+class ConfidentGoalPick(BaseModel):
+    home_team: str
+    away_team: str
+    league: str | None
+    kickoff: str
+    market: str
+    avg_prob: float
+    consensus_count: int
+    total_strategies: int
+    strategy_probs: dict[str, float]
+
+
+class AllPredictions(BaseModel):
+    value_bets: list[Prediction]
+    safe_picks: list[SafePick]
+    accumulators: list[Accumulator]
+    confident_goals: list[ConfidentGoalPick]
 
 
 class TaskStarted(BaseModel):

@@ -1,4 +1,4 @@
-import type { DataStatus, MatchResult, Prediction, TaskStarted } from '@/types'
+import type { AllPredictions, DataStatus, MatchResult, Prediction, TaskStarted } from '@/types'
 
 const BASE = ''
 
@@ -15,6 +15,7 @@ export const api = {
   getDataStatus: () => fetchJSON<DataStatus>('/api/data/status'),
   getResults: (limit = 20) => fetchJSON<MatchResult[]>(`/api/data/results?limit=${limit}`),
   getPredictions: () => fetchJSON<Prediction[]>('/api/predictions/latest'),
+  getAllPredictions: () => fetchJSON<AllPredictions>('/api/predictions/all'),
 
   startDownload: (full = false) =>
     fetchJSON<TaskStarted>(`/api/tasks/download?full=${full}`, { method: 'POST' }),

@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 
 export interface LogEntry {
   id: string
@@ -20,29 +22,48 @@ const levelColors: Record<LogEntry['level'], string> = {
 }
 
 export function EventLog({ entries }: Props) {
+  const [open, setOpen] = useState(false)
+
   return (
-    <Card className="flex flex-col min-h-0 flex-1">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Hendelser</CardTitle>
-      </CardHeader>
-      <CardContent className="flex-1 min-h-0 p-0">
-        <ScrollArea className="h-full px-4 pb-4">
-          {entries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Ingen hendelser</p>
+    <Card>
+      <CardHeader
+        className="pb-2 cursor-pointer select-none"
+        onClick={() => setOpen(!open)}
+      >
+        <CardTitle className="text-sm flex items-center gap-1.5">
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5" />
           ) : (
-            <div className="space-y-1">
-              {entries.map((entry) => (
-                <div key={entry.id} className="text-xs flex gap-2">
-                  <span className="text-muted-foreground font-mono shrink-0">
-                    {entry.time}
-                  </span>
-                  <span className={levelColors[entry.level]}>{entry.message}</span>
-                </div>
-              ))}
-            </div>
+            <ChevronRight className="h-3.5 w-3.5" />
           )}
-        </ScrollArea>
-      </CardContent>
+          Hendelser
+          {entries.length > 0 && (
+            <span className="text-xs font-normal text-muted-foreground">
+              ({entries.length})
+            </span>
+          )}
+        </CardTitle>
+      </CardHeader>
+      {open && (
+        <CardContent className="p-0">
+          <ScrollArea className="max-h-48 px-4 pb-4">
+            {entries.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Ingen hendelser</p>
+            ) : (
+              <div className="space-y-1">
+                {entries.map((entry) => (
+                  <div key={entry.id} className="text-xs flex gap-2">
+                    <span className="text-muted-foreground font-mono shrink-0">
+                      {entry.time}
+                    </span>
+                    <span className={levelColors[entry.level]}>{entry.message}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      )}
     </Card>
   )
 }

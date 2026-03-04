@@ -63,8 +63,11 @@ class TaskManager:
 
     def _start_task(self, task_type: TaskType, **kwargs) -> str:
         with self._lock:
-            if self._current is not None and self._current.thread.is_alive():
-                raise RuntimeError(f"Task {self._current.task_type.value} is already running")
+            if self._current is not None:
+                if self._current.thread.is_alive():
+                    raise RuntimeError(f"Task {self._current.task_type.value} is already running")
+                # Dead thread — clean up stale task
+                self._current = None
 
             task_id = uuid.uuid4().hex[:8]
             thread = threading.Thread(
@@ -98,9 +101,9 @@ class TaskManager:
 
             if isinstance(event, (DownloadFinished, TrainingFinished, PredictionFinished)):
                 data = _serialize_event(event)
-                # Cache predictions to disk for the /api/predictions/latest endpoint
-                if isinstance(event, PredictionFinished) and event.picks:
-                    _cache_predictions(event.picks)
+                # Cache predictions to disk for the REST endpoints
+                if isinstance(event, PredictionFinished):
+                    _cache_predictions(event)
                 self.broadcast(TaskEvent(event_type="finished", data=data))
             elif isinstance(event, (DownloadError, TrainingError, PredictionError)):
                 self.broadcast(TaskEvent(event_type="error", data={"message": event.error}))
@@ -153,15 +156,21 @@ class TaskManager:
             self._loop.call_soon_threadsafe(q.put_nowait, event)
 
 
-def _cache_predictions(picks: list) -> None:
-    """Save predictions to disk so the REST endpoint can serve them."""
+def _cache_predictions(event) -> None:
+    """Save predictions to disk so the REST endpoints can serve them."""
     import json
     from pathlib import Path
 
     cache_path = Path(__file__).parent.parent.parent.parent / "data" / "processed" / "latest_predictions.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "value_bets": event.picks,
+        "safe_picks": event.safe_picks,
+        "accumulators": event.accumulators,
+        "confident_goals": event.confident_goals,
+    }
     with open(cache_path, "w") as f:
-        json.dump(picks, f, indent=2, default=str)
+        json.dump(data, f, indent=2, default=str)
 
 
 def _serialize_event(event: Any) -> dict:
@@ -213,5 +222,8 @@ def _serialize_event(event: Any) -> dict:
             "picks": event.picks,
             "match_count": event.match_count,
             "stale_warning": event.stale_warning,
+            "safe_picks": event.safe_picks,
+            "accumulators": event.accumulators,
+            "confident_goals": event.confident_goals,
         }
     return {"type": type(event).__name__}

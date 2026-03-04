@@ -31,6 +31,10 @@ data/predictions/*
 # Models (keep structure, ignore model files)
 models/*.pkl
 models/*.joblib
+models/*.json
+
+# Root package-lock (web/ has its own)
+/package-lock.json
 
 # Training reports (generated per run)
 reports/

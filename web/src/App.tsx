@@ -1,15 +1,29 @@
 import { useCallback, useRef, useState } from 'react'
+import { TooltipProvider } from '@/components/ui/tooltip'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
+import { Button } from '@/components/ui/button'
 import { ChatPanel } from '@/components/chat/ChatPanel'
-import { DataQualityCard } from '@/components/dashboard/DataQualityCard'
-import { ActivityIndicator } from '@/components/dashboard/ActivityIndicator'
+import { StatusMetricsRow } from '@/components/dashboard/StatusMetricsRow'
+import { ActionsBar } from '@/components/dashboard/ActionsBar'
+import { PredictionsCard } from '@/components/predictions/PredictionsCard'
+import { SafePicksCard } from '@/components/predictions/SafePicksCard'
+import { ConfidentGoalsCard } from '@/components/predictions/ConfidentGoalsCard'
+import { ResultsCard } from '@/components/dashboard/ResultsCard'
 import { EventLog, type LogEntry } from '@/components/dashboard/EventLog'
-import { PredictionsTable } from '@/components/predictions/PredictionsTable'
 import { useChat } from '@/hooks/useChat'
 import { useTaskStream } from '@/hooks/useTaskStream'
 import { useDataStatus } from '@/hooks/useDataStatus'
+import { useResults } from '@/hooks/useResults'
+import { usePredictions } from '@/hooks/usePredictions'
 import { api } from '@/lib/api'
-import type { Prediction } from '@/types'
-import { Circle } from 'lucide-react'
+import type { Accumulator, ConfidentGoalPick, Prediction, SafePick } from '@/types'
+import { Circle, MessageSquare } from 'lucide-react'
 
 let logId = 0
 
@@ -17,10 +31,21 @@ function App() {
   const chat = useChat()
   const task = useTaskStream()
   const { status, loading: statusLoading, refresh: refreshStatus } = useDataStatus()
+  const { results, loading: resultsLoading, refresh: refreshResults } = useResults()
+  const {
+    predictions,
+    setPredictions,
+    safePicks,
+    setSafePicks,
+    accumulators,
+    setAccumulators,
+    confidentGoals,
+    setConfidentGoals,
+    loading: predictionsLoading,
+    refresh: refreshPredictions,
+  } = usePredictions()
   const [logs, setLogs] = useState<LogEntry[]>([])
-  const [predictions, setPredictions] = useState<Prediction[]>([])
-  const predictionsRef = useRef(predictions)
-  predictionsRef.current = predictions
+  const [chatOpen, setChatOpen] = useState(false)
 
   const addLog = useCallback((message: string, level: LogEntry['level'] = 'info') => {
     const now = new Date()
@@ -28,136 +53,36 @@ function App() {
     setLogs((prev) => [...prev.slice(-99), { id: `log-${++logId}`, time, message, level }])
   }, [])
 
-  const handleCommand = useCallback(
-    async (command: string, args: string) => {
-      if (command === 'help') {
-        chat.addSystemMessage(
-          '**Tilgjengelige kommandoer:**\n' +
-          '- `/download` - Last ned data fra FootyStats\n' +
-          '- `/download full` - Last ned all data\n' +
-          '- `/train` - Tren ML-modeller\n' +
-          '- `/predict` - Finn value bets\n' +
-          '- `/results` - Vis nyeste kampresultater\n' +
-          '- `/status` - Oppdater status\n' +
-          '- `/clear` - Nullstill chat-historikk'
-        )
-        return
-      }
-
-      if (command === 'clear') {
-        try {
-          await api.clearChatHistory()
-          window.location.reload()
-        } catch {
-          addLog('Kunne ikke nullstille chat', 'error')
-        }
-        return
-      }
-
-      if (command === 'status') {
-        refreshStatus()
-        addLog('Status oppdatert', 'info')
-        return
-      }
-
-      if (command === 'results') {
-        try {
-          const results = await api.getResults()
-          if (results.length === 0) {
-            chat.addSystemMessage('Ingen ferdigspilte kamper funnet.')
-            return
-          }
-          const header = '| Dato | Liga | Hjemme | | | Borte |\n|------|------|--------|---|---|------|\n'
-          const rows = results
-            .map((r) => `| ${r.date} | ${r.league || ''} | ${r.home_team} | ${r.home_goals} | ${r.away_goals} | ${r.away_team} |`)
-            .join('\n')
-          chat.addSystemMessage(header + rows)
-        } catch {
-          addLog('Kunne ikke hente resultater', 'error')
-        }
-        return
-      }
-
-      // Long-running tasks
-      if (['download', 'train', 'predict'].includes(command)) {
-        try {
-          let result
-          if (command === 'download') {
-            const full = args.trim().toLowerCase() === 'full'
-            result = await api.startDownload(full)
-            addLog(`Starter nedlasting${full ? ' (full)' : ''}...`, 'info')
-          } else if (command === 'train') {
-            result = await api.startTraining()
-            addLog('Starter trening...', 'info')
-          } else {
-            result = await api.startPredictions()
-            addLog('Starter predictions...', 'info')
-          }
-          task.startStream(result.task_id, result.task_type)
-        } catch (e) {
-          addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
-        }
-        return
-      }
-
-      chat.addSystemMessage(`Ukjent kommando: /${command}`)
-    },
-    [chat, task, addLog, refreshStatus]
-  )
-
-  // Handle task completion side effects
-  const prevFinishedRef = useRef(false)
-  if (task.finished && !prevFinishedRef.current) {
-    prevFinishedRef.current = true
-    refreshStatus()
-
-    if (task.type === 'download' && task.result) {
-      const r = task.result as { ok: number; skipped: number; matches: number; failed: number }
-      addLog(`Nedlasting ferdig: ${r.ok} sesonger, ${r.matches} kamper`, 'success')
-    } else if (task.type === 'train' && task.result) {
-      addLog('Trening fullfort', 'success')
-    } else if (task.type === 'predict' && task.result) {
-      const r = task.result as { picks: Prediction[]; match_count: number; stale_warning?: string }
-      setPredictions(r.picks || [])
-      if (r.picks?.length) {
-        addLog(`Fant ${r.picks.length} value bets fra ${r.match_count} kamper`, 'success')
-        // Render predictions inline in chat
-        const header = '| Tid | Kamp | Market | Modell | Edge | Konf. |\n|-----|------|--------|--------|------|-------|\n'
-        const rows = r.picks
-          .map(
-            (p: Prediction) =>
-              `| ${p.kickoff} | ${p.home_team} vs ${p.away_team} | ${p.market} | ${p.model_prob != null ? (p.model_prob * 100).toFixed(1) + '%' : '-'} | ${p.edge != null ? (p.edge * 100).toFixed(1) + '%' : '-'} | ${p.confidence} |`
-          )
-          .join('\n')
-        chat.addSystemMessage(`**Value bets funnet:**\n\n${header}${rows}`)
-      } else {
-        addLog(`Ingen value bets funnet (${r.match_count} kamper analysert)`, 'info')
-        chat.addSystemMessage('Ingen value bets funnet.')
-      }
-      if (r.stale_warning) {
-        addLog(r.stale_warning, 'warning')
-      }
+  // Action handlers
+  const handleDownload = useCallback(async () => {
+    try {
+      const result = await api.startDownload(false)
+      addLog('Starter nedlasting...', 'info')
+      task.startStream(result.task_id, result.task_type)
+    } catch (e) {
+      addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
     }
+  }, [task, addLog])
 
-    // Auto-clear task state after showing result
-    setTimeout(() => {
-      task.clear()
-      prevFinishedRef.current = false
-    }, 2000)
-  }
-  if (task.error && prevFinishedRef.current === false) {
-    // Reset on new task
-  }
-  if (!task.taskId) {
-    prevFinishedRef.current = false
-  }
+  const handleTrain = useCallback(async () => {
+    try {
+      const result = await api.startTraining()
+      addLog('Starter trening...', 'info')
+      task.startStream(result.task_id, result.task_type)
+    } catch (e) {
+      addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
+    }
+  }, [task, addLog])
 
-  // Log task progress
-  const prevProgressRef = useRef<string | null>(null)
-  if (task.progress && task.progress.detail !== prevProgressRef.current) {
-    prevProgressRef.current = task.progress.detail
-    addLog(task.progress.detail, 'info')
-  }
+  const handlePredict = useCallback(async () => {
+    try {
+      const result = await api.startPredictions()
+      addLog('Starter predictions...', 'info')
+      task.startStream(result.task_id, result.task_type)
+    } catch (e) {
+      addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
+    }
+  }, [task, addLog])
 
   const handleCancel = useCallback(async () => {
     if (task.taskId) {
@@ -171,44 +96,157 @@ function App() {
     }
   }, [task, addLog])
 
-  return (
-    <div className="h-screen flex flex-col bg-background text-foreground">
-      <header className="border-b px-4 py-2 flex items-center gap-2 shrink-0">
-        <span className="font-bold text-lg">BetBot</span>
-        <span className="text-muted-foreground text-sm">Value Bet Analysis</span>
-        <div className="flex-1" />
-        <Circle
-          className={`h-2.5 w-2.5 ${chat.connected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`}
-        />
-      </header>
-      <main className="flex-1 flex overflow-hidden">
-        {/* Chat - left panel */}
-        <div className="flex-1 min-w-0">
-          <ChatPanel
-            messages={chat.messages}
-            connected={chat.connected}
-            streaming={chat.streaming}
-            onSend={chat.sendMessage}
-            onCommand={handleCommand}
-          />
-        </div>
+  // Handle task completion side effects
+  const prevFinishedRef = useRef(false)
+  if (task.finished && !prevFinishedRef.current) {
+    prevFinishedRef.current = true
+    refreshStatus()
+    refreshResults()
+    refreshPredictions()
 
-        {/* Sidebar - right panel */}
-        <aside className="w-72 border-l flex flex-col gap-3 p-3 overflow-y-auto shrink-0">
-          <DataQualityCard status={status} loading={statusLoading} />
-          <ActivityIndicator
+    if (task.type === 'download' && task.result) {
+      const r = task.result as { ok: number; skipped: number; matches: number; failed: number }
+      addLog(`Nedlasting ferdig: ${r.ok} sesonger, ${r.matches} kamper`, 'success')
+    } else if (task.type === 'train' && task.result) {
+      addLog('Trening fullfort', 'success')
+    } else if (task.type === 'predict' && task.result) {
+      const r = task.result as {
+        picks: Prediction[]
+        match_count: number
+        stale_warning?: string
+        safe_picks?: SafePick[]
+        accumulators?: Accumulator[]
+        confident_goals?: ConfidentGoalPick[]
+      }
+      setPredictions(r.picks || [])
+      setSafePicks(r.safe_picks || [])
+      setAccumulators(r.accumulators || [])
+      setConfidentGoals(r.confident_goals || [])
+      if (r.picks?.length) {
+        addLog(`Fant ${r.picks.length} value bets fra ${r.match_count} kamper`, 'success')
+      } else {
+        addLog(`Ingen value bets funnet (${r.match_count} kamper analysert)`, 'info')
+      }
+      if (r.safe_picks?.length) {
+        addLog(`${r.safe_picks.length} sikre picks, ${r.accumulators?.length || 0} kombispill`, 'success')
+      }
+      if (r.confident_goals?.length) {
+        addLog(`${r.confident_goals.length} sikre BTTS/O2.5 picks`, 'success')
+      }
+      if (r.stale_warning) {
+        addLog(r.stale_warning, 'warning')
+      }
+    }
+
+    setTimeout(() => {
+      task.clear()
+      prevFinishedRef.current = false
+    }, 2000)
+  }
+  if (!task.taskId) {
+    prevFinishedRef.current = false
+  }
+
+  // Log task progress
+  const prevProgressRef = useRef<string | null>(null)
+  if (task.progress && task.progress.detail !== prevProgressRef.current) {
+    prevProgressRef.current = task.progress.detail
+    addLog(task.progress.detail, 'info')
+  }
+
+  return (
+    <TooltipProvider>
+      <div className="min-h-screen bg-background text-foreground">
+        {/* Header */}
+        <header className="border-b px-4 py-2.5 flex items-center gap-2 sticky top-0 bg-background/95 backdrop-blur z-40">
+          <span className="font-bold text-lg">BetBot</span>
+          <Circle
+            className={`h-2 w-2 ${chat.connected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`}
+          />
+          <div className="flex-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setChatOpen(true)}
+          >
+            <MessageSquare className="h-4 w-4" />
+            Chat
+          </Button>
+        </header>
+
+        {/* Dashboard content */}
+        <div className="px-6 py-4 space-y-4">
+          {/* Status metrics */}
+          <StatusMetricsRow status={status} loading={statusLoading} />
+
+          {/* Actions */}
+          <ActionsBar
             taskId={task.taskId}
             taskType={task.type}
             progress={task.progress}
             error={task.error}
             finished={task.finished}
+            onDownload={handleDownload}
+            onTrain={handleTrain}
+            onPredict={handlePredict}
             onCancel={handleCancel}
           />
-          {predictions.length > 0 && <PredictionsTable predictions={predictions} />}
+
+          {/* Two-column grid: predictions + results */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3">
+              <PredictionsCard
+                predictions={predictions}
+                loading={predictionsLoading}
+              />
+            </div>
+            <div className="lg:col-span-2">
+              <ResultsCard results={results} loading={resultsLoading} />
+            </div>
+          </div>
+
+          {/* Second row: safe picks + confident goals */}
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+            <div className="lg:col-span-3">
+              <SafePicksCard
+                safePicks={safePicks}
+                accumulators={accumulators}
+                loading={predictionsLoading}
+              />
+            </div>
+            <div className="lg:col-span-2">
+              <ConfidentGoalsCard
+                confidentGoals={confidentGoals}
+                loading={predictionsLoading}
+              />
+            </div>
+          </div>
+
+          {/* Event log (collapsible) */}
           <EventLog entries={logs} />
-        </aside>
-      </main>
-    </div>
+        </div>
+
+        {/* Chat Sheet */}
+        <Sheet open={chatOpen} onOpenChange={setChatOpen}>
+          <SheetContent side="right" className="w-full sm:max-w-lg p-0 gap-0">
+            <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
+              <SheetTitle>Chat</SheetTitle>
+              <SheetDescription>
+                Still sporsmal om modellen, data eller value bets.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 min-h-0">
+              <ChatPanel
+                messages={chat.messages}
+                connected={chat.connected}
+                streaming={chat.streaming}
+                onSend={chat.sendMessage}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    </TooltipProvider>
   )
 }
 

@@ -321,10 +321,21 @@ class PredictionProgress(Message):
 class PredictionFinished(Message):
     """Posted when predictions are complete."""
 
-    def __init__(self, picks: list, match_count: int, stale_warning: str | None = None) -> None:
+    def __init__(
+        self,
+        picks: list,
+        match_count: int,
+        stale_warning: str | None = None,
+        safe_picks: list | None = None,
+        accumulators: list | None = None,
+        confident_goals: list | None = None,
+    ) -> None:
         self.picks = picks
         self.match_count = match_count
         self.stale_warning = stale_warning
+        self.safe_picks = safe_picks or []
+        self.accumulators = accumulators or []
+        self.confident_goals = confident_goals or []
         super().__init__()
 
 
@@ -342,7 +353,7 @@ def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck)
     Loads model, fetches NT matches, computes features, predicts, finds value bets.
     Uses generic callbacks so it can be driven by TUI or API.
     """
-    on_progress(PredictionProgress(step="Laster modell", detail="Laster ML-modell og historisk data..."))
+    on_progress(PredictionProgress(step="Laster modeller", detail="Laster strategier og historisk data..."))
 
     try:
         from src.predictions.daily_picks import DailyPicksFinder
@@ -350,11 +361,15 @@ def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck)
         finder = DailyPicksFinder()
         finder.load_model()
     except Exception as e:
-        on_progress(PredictionError(f"Kunne ikke laste modell: {e}"))
+        on_progress(PredictionError(f"Kunne ikke laste modeller: {e}"))
         return
 
     match_count = len(finder.matches_df) if finder.matches_df is not None else 0
-    on_progress(PredictionProgress(step="Laster modell", detail=f"Modell lastet ({match_count:,} kamper)"))
+    strategy_count = len(finder._strategies)
+    on_progress(PredictionProgress(
+        step="Laster modeller",
+        detail=f"{strategy_count} strategier lastet ({match_count:,} kamper)",
+    ))
 
     if is_cancelled():
         return
@@ -387,16 +402,39 @@ def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck)
     if is_cancelled():
         return
 
-    # Find value bets
-    on_progress(PredictionProgress(step="Analyserer", detail=f"Analyserer {len(matches)} kamper..."))
+    # Run strategies on all matches once
+    on_progress(PredictionProgress(
+        step="Analyserer",
+        detail=f"Kjorer {strategy_count} strategier pa {len(matches)} kamper...",
+    ))
 
     try:
-        picks = finder.find_value_bets(matches)
+        match_data = finder._run_strategies_on_matches(matches)
     except Exception as e:
         on_progress(PredictionError(f"Feil under analyse: {e}"))
         return
 
-    on_progress(PredictionFinished(picks=picks, match_count=len(matches), stale_warning=stale_warning))
+    if is_cancelled():
+        return
+
+    # Derive all pick types from the shared match data
+    try:
+        picks = finder.find_value_bets(match_data)
+        safe_picks = finder.find_safe_picks(match_data)
+        accumulators = finder.generate_accumulators(safe_picks)
+        confident_goals = finder.find_confident_goals(match_data)
+    except Exception as e:
+        on_progress(PredictionError(f"Feil under analyse: {e}"))
+        return
+
+    on_progress(PredictionFinished(
+        picks=picks,
+        match_count=len(matches),
+        stale_warning=stale_warning,
+        safe_picks=safe_picks,
+        accumulators=accumulators,
+        confident_goals=confident_goals,
+    ))
 
 
 class _ProgressWriter(io.TextIOBase):
@@ -578,56 +616,89 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     if is_cancelled():
         return
 
-    # Step 4: Train models (capture stdout from MatchPredictor.train())
-    on_progress(TrainingProgress(step="Trening", detail="Trener ML-modeller...", percent=78))
+    # Step 4: Train all strategies
+    from src.strategies import STRATEGIES
+    from src.strategies.base import StrategyTrainingError
 
-    step_start = time.time()
-    predictor = MatchPredictor()
+    # Load matches with league info for strategies that need raw match data (Poisson, Elo)
+    matches_with_league = processor.load_matches_with_league()
 
-    progress_writer = _ProgressWriter(on_progress, step="Trening")
-    with contextlib.redirect_stdout(progress_writer):
-        results = predictor.train(features_df)
+    strategy_count = len(STRATEGIES)
+    trained_strategies = []
+    report["strategy_results"] = {}
 
-    step_elapsed = time.time() - step_start
-    report["steps"]["train_models"] = {"duration_seconds": step_elapsed}
-    report["model_performance"] = {
-        "result_1x2": {
-            "accuracy": results["result"]["accuracy"],
-            "log_loss": results["result"]["log_loss"],
-            "classes": results["result"]["classes"],
-        },
-        "over_25": {
-            "accuracy": results["over25"]["accuracy"],
-            "log_loss": results["over25"]["log_loss"],
-        },
-        "btts": {
-            "accuracy": results["btts"]["accuracy"],
-            "log_loss": results["btts"]["log_loss"],
-        },
-    }
+    for idx, strategy in enumerate(STRATEGIES):
+        if is_cancelled():
+            return
 
-    on_progress(TrainingProgress(step="Trening", detail="Modeller trent", percent=92))
+        pct = 78 + int((idx / strategy_count) * 12)  # 78-90%
+        on_progress(TrainingProgress(
+            step="Trening",
+            detail=f"Trener {strategy.name} ({idx + 1}/{strategy_count})...",
+            percent=pct,
+        ))
+
+        step_start = time.time()
+        try:
+            progress_writer = _ProgressWriter(on_progress, step="Trening")
+            with contextlib.redirect_stdout(progress_writer):
+                result = strategy.train(matches_with_league, features_df)
+            trained_strategies.append(strategy)
+            report["strategy_results"][strategy.slug] = {
+                "name": strategy.name,
+                "status": "ok",
+                "duration_seconds": result.duration_seconds,
+                "num_samples": result.num_samples,
+                "accuracy": result.accuracy,
+                "log_loss": result.log_loss,
+            }
+        except (StrategyTrainingError, Exception) as exc:
+            report["strategy_results"][strategy.slug] = {
+                "name": strategy.name,
+                "status": "error",
+                "error": str(exc),
+            }
+            on_progress(TrainingProgress(
+                step="Trening",
+                detail=f"{strategy.name}: FEILET - {exc}",
+                percent=pct,
+            ))
+
+    # Legacy model_performance for backwards compatibility
+    xgb_result = report["strategy_results"].get("xgboost", {})
+    if xgb_result.get("status") == "ok":
+        report["model_performance"] = {
+            "result_1x2": {"accuracy": xgb_result["accuracy"].get("result")},
+            "over_25": {"accuracy": xgb_result["accuracy"].get("over25")},
+            "btts": {"accuracy": xgb_result["accuracy"].get("btts")},
+        }
+
+    on_progress(TrainingProgress(
+        step="Trening",
+        detail=f"{len(trained_strategies)}/{strategy_count} strategier trent",
+        percent=92,
+    ))
 
     if is_cancelled():
         return
 
-    # Step 5: Save models
+    # Step 5: Save all strategy models
     on_progress(TrainingProgress(step="Lagrer", detail="Lagrer modeller...", percent=93))
 
     step_start = time.time()
     model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    versioned_name = f"match_predictor_{model_version}"
+    models_dir = Path(__file__).parent.parent.parent / "models"
+    models_dir.mkdir(parents=True, exist_ok=True)
 
-    with contextlib.redirect_stdout(io.StringIO()):  # suppress save prints
-        predictor.save()
-        predictor.save(versioned_name)
+    for strategy in trained_strategies:
+        ext = "json" if strategy.slug in ("poisson", "elo") else "pkl"
+        strategy.save(models_dir / f"{strategy.slug}.{ext}")
 
     step_elapsed = time.time() - step_start
     report["steps"]["save_models"] = {
         "duration_seconds": step_elapsed,
         "model_version": model_version,
-        "model_path": str(predictor.model_dir / "match_predictor.pkl"),
-        "versioned_path": str(predictor.model_dir / f"{versioned_name}.pkl"),
+        "strategies_saved": [s.slug for s in trained_strategies],
     }
 
     # Save training report

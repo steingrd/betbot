@@ -42,6 +42,9 @@ from features.cache_metadata import (
 from features.feature_engineering import FeatureEngineer
 from models.match_predictor import MatchPredictor
 from analysis.value_finder import ValueBetFinder
+from strategies import STRATEGIES
+from strategies.base import StrategyTrainingError
+from strategies.consensus import ConsensusEngine
 from sklearn.metrics import brier_score_loss
 from sklearn.calibration import calibration_curve
 import numpy as np
@@ -102,7 +105,7 @@ def format_season_label(start_date: int, end_date: int) -> str:
     - Calendar year (Jan-Dec): "2024"
     - Aug-May season: "2024/2025"
     """
-    if start_date is None or end_date is None:
+    if start_date is None or end_date is None or pd.isna(start_date) or pd.isna(end_date):
         return "Unknown"
 
     start = datetime.fromtimestamp(start_date)
@@ -657,6 +660,316 @@ def run_in_sample_backtest():
     print(f"ROI: {results['roi']:.1f}% (IN-SAMPLE - not reliable)")
 
 
+def run_multi_strategy_backtest(holdout_seasons: int = 1, exclude_cups: bool = False,
+                                 league_filter: list = None, min_edge: float = 0.05):
+    """
+    Multi-strategy consensus backtest (GO/NO-GO gate).
+
+    Trains all 4 strategies on the training set, predicts on the hold-out set,
+    and compares per-strategy ROI vs consensus ROI at different thresholds.
+    """
+    print("=" * 60)
+    print("MULTI-STRATEGY CONSENSUS BACKTEST")
+    print("=" * 60)
+
+    # --- Reuse existing data loading infrastructure ---
+    processor = DataProcessor()
+    matches = processor.load_matches()
+    matches_with_league = processor.load_matches_with_league()
+    print(f"Loaded {len(matches)} matches")
+
+    seasons = get_season_info_by_league(processor)
+    if len(seasons) == 0:
+        print("\nERROR: No season metadata. Run 'python scripts/download_all_leagues.py' first.")
+        return
+
+    if exclude_cups:
+        cup_pattern = '|'.join(CUP_KEYWORDS)
+        cup_mask = seasons['league_name'].str.contains(cup_pattern, case=False, na=False)
+        seasons = seasons[~cup_mask]
+
+    if league_filter:
+        filter_lower = [name.lower() for name in league_filter]
+        league_mask = seasons['league_name'].str.lower().isin(filter_lower)
+        seasons = seasons[league_mask]
+        print(f"Filtered to leagues: {', '.join(seasons['league_name'].unique())}")
+
+    # Load or generate features (with caching)
+    features_cache = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
+    features_metadata = features_cache.with_suffix(".meta.json")
+    source_fingerprint = compute_source_fingerprint(matches)
+    expected_cols = set(MatchPredictor.FEATURE_COLS)
+    need_regenerate = True
+    features = None
+
+    if features_cache.exists():
+        print(f"\nLoading cached features...")
+        metadata = read_cache_metadata(features_metadata)
+        cache_ok, reason = validate_cache_metadata(
+            metadata,
+            feature_version=FeatureEngineer.FEATURE_VERSION,
+            source_fingerprint=source_fingerprint,
+        )
+        if cache_ok:
+            features = pd.read_csv(features_cache)
+            if (expected_cols.issubset(set(features.columns))
+                    and "season_id" in features.columns
+                    and "league_id" in features.columns):
+                need_regenerate = False
+                print(f"Loaded {len(features)} cached features")
+
+    if need_regenerate:
+        print(f"\nGenerating features...")
+        engineer = FeatureEngineer(matches)
+        features = engineer.generate_features(progress_callback=print_progress)
+        print()
+        features.to_csv(features_cache, index=False)
+        write_cache_metadata(
+            features_metadata,
+            feature_version=FeatureEngineer.FEATURE_VERSION,
+            source_fingerprint=source_fingerprint,
+            match_count=len(matches),
+        )
+
+    # Split train/test per league
+    print(f"\nSplitting data (holding out {holdout_seasons} season(s) per league)...")
+    train_features, test_features, split_info = split_train_test_per_league(
+        features, seasons, holdout_seasons
+    )
+
+    # Filter to completed matches
+    now = int(time.time())
+    test_features = test_features[
+        (test_features["date_unix"] < now) &
+        (test_features["target_result"].notna()) &
+        (test_features["target_result"].isin(["H", "D", "A"]))
+    ].copy()
+
+    print(f"Train set: {len(train_features)} matches")
+    print(f"Test set: {len(test_features)} matches")
+
+    if len(test_features) < MIN_TEST_SIZE:
+        print(f"\n  WARNING: Small test set ({len(test_features)} < {MIN_TEST_SIZE})")
+
+    # Verify no leakage
+    if not verify_no_leakage(train_features, test_features):
+        print("  WARNING: Potential data leakage detected!")
+
+    # --- Get train/test match data for strategies that need raw matches ---
+    train_season_ids = set(train_features["season_id"].dropna().unique())
+    test_season_ids = set(test_features["season_id"].dropna().unique())
+    train_matches = matches_with_league[matches_with_league["season_id"].isin(train_season_ids)].copy()
+    test_matches = matches_with_league[matches_with_league["season_id"].isin(test_season_ids)].copy()
+
+    # --- Train all strategies ---
+    print("\n" + "=" * 60)
+    print("TRAINING ALL STRATEGIES")
+    print("=" * 60)
+
+    trained_strategies = {}
+    for strategy in STRATEGIES:
+        print(f"\n--- {strategy.name} ---")
+        try:
+            result = strategy.train(train_matches, train_features)
+            trained_strategies[strategy.slug] = strategy
+            print(f"  Trained on {result.num_samples} samples in {result.duration_seconds:.1f}s")
+            if result.accuracy.get("result") is not None:
+                print(f"  Accuracy: {result.accuracy}")
+        except StrategyTrainingError as exc:
+            print(f"  FAILED: {exc}")
+        except Exception as exc:
+            print(f"  UNEXPECTED ERROR: {exc}")
+
+    print(f"\n{len(trained_strategies)}/{len(STRATEGIES)} strategies trained successfully")
+
+    if len(trained_strategies) < 2:
+        print("\nERROR: Need at least 2 strategies for consensus. Aborting.")
+        return
+
+    # --- Predict on test set ---
+    print("\n" + "=" * 60)
+    print("PREDICTING ON HOLD-OUT SET")
+    print("=" * 60)
+
+    strategy_predictions = {}
+    strategy_names = {}
+    for slug, strategy in trained_strategies.items():
+        try:
+            preds = strategy.predict(test_matches, test_features)
+            strategy_predictions[slug] = preds
+            strategy_names[slug] = strategy.name
+            print(f"  {strategy.name}: {len(preds)} predictions")
+        except Exception as exc:
+            print(f"  {strategy.name}: FAILED - {exc}")
+
+    # --- Per-strategy value bet backtest ---
+    print("\n" + "=" * 60)
+    print(f"PER-STRATEGY BACKTEST (min_edge={min_edge:.0%})")
+    print("=" * 60)
+
+    finder = ValueBetFinder(min_edge=min_edge, min_odds=1.5, max_odds=8.0,
+                            markets=ValueBetFinder.ALL_MARKETS)
+
+    strategy_results = {}
+    for slug, preds in strategy_predictions.items():
+        name = strategy_names[slug]
+        strategy_obj = trained_strategies[slug]
+        markets = strategy_obj.supported_markets
+
+        # Map supported markets to value finder market names
+        market_map = {"H": "Home", "D": "Draw", "A": "Away", "Over 2.5": "Over 2.5", "BTTS": "BTTS"}
+        finder_markets = [market_map[m] for m in markets if m in market_map]
+
+        market_finder = ValueBetFinder(min_edge=min_edge, min_odds=1.5, max_odds=8.0,
+                                        markets=finder_markets)
+
+        # Predict and find value bets
+        value_bets = market_finder.find_value_bets(preds, test_features)
+
+        if len(value_bets) > 0:
+            bt = market_finder.backtest(value_bets, stake=10.0)
+            roi_mean, roi_lower, roi_upper = bootstrap_roi_ci(value_bets, stake=10.0)
+            strategy_results[slug] = {
+                "name": name,
+                "bets": len(value_bets),
+                "win_rate": bt["win_rate"],
+                "roi": bt["roi"],
+                "roi_ci": (roi_lower, roi_upper),
+            }
+        else:
+            strategy_results[slug] = {
+                "name": name,
+                "bets": 0,
+                "win_rate": 0,
+                "roi": 0,
+                "roi_ci": (0, 0),
+            }
+
+    # Print per-strategy results
+    print(f"\n{'Strategy':<15} {'Bets':>5} {'Win%':>6} {'ROI':>8} {'95% CI':>20}")
+    print("-" * 58)
+    for slug, res in strategy_results.items():
+        ci = f"[{res['roi_ci'][0]:+.1f}%, {res['roi_ci'][1]:+.1f}%]"
+        print(f"{res['name']:<15} {res['bets']:>5} {res['win_rate']:>5.0%} {res['roi']:>+7.1f}% {ci:>20}")
+
+    # --- Consensus backtest ---
+    print("\n" + "=" * 60)
+    print("CONSENSUS BACKTEST")
+    print("=" * 60)
+
+    engine = ConsensusEngine()
+    consensus_bets = engine.find_consensus_bets(
+        strategy_predictions, strategy_names, test_features, min_edge=min_edge
+    )
+    print(f"Total consensus signals: {len(consensus_bets)}")
+
+    # Backtest at different consensus thresholds
+    consensus_results = {}
+    for min_consensus in range(1, len(trained_strategies) + 1):
+        filtered = [b for b in consensus_bets if b.consensus_count >= min_consensus]
+
+        if not filtered:
+            consensus_results[min_consensus] = {"bets": 0, "win_rate": 0, "roi": 0, "roi_ci": (0, 0)}
+            continue
+
+        # Build a DataFrame for backtest
+        bet_rows = []
+        for bet in filtered:
+            # Determine actual result
+            match_row = test_features[
+                test_features["match_id"] == float(bet.match_id)
+            ] if bet.match_id.replace('.', '').replace('-', '').isdigit() else test_features[
+                test_features["match_id"] == bet.match_id
+            ]
+
+            if match_row.empty:
+                continue
+
+            match_row = match_row.iloc[0]
+
+            actual_win = False
+            if bet.market == "Home":
+                actual_win = match_row["target_result"] == "H"
+            elif bet.market == "Draw":
+                actual_win = match_row["target_result"] == "D"
+            elif bet.market == "Away":
+                actual_win = match_row["target_result"] == "A"
+            elif bet.market == "Over 2.5":
+                actual_win = bool(match_row["target_over_25"])
+            elif bet.market == "BTTS":
+                actual_win = bool(match_row["target_btts"])
+
+            avg_prob = np.mean([s.model_prob for s in bet.signals if s.is_value])
+            bet_rows.append({
+                "match_id": bet.match_id,
+                "market": bet.market,
+                "odds": bet.odds,
+                "model_prob": avg_prob,
+                "implied_prob": bet.implied_prob,
+                "edge": avg_prob - bet.implied_prob,
+                "actual_win": actual_win,
+                "consensus_count": bet.consensus_count,
+                "total_strategies": bet.total_strategies,
+            })
+
+        if not bet_rows:
+            consensus_results[min_consensus] = {"bets": 0, "win_rate": 0, "roi": 0, "roi_ci": (0, 0)}
+            continue
+
+        bet_df = pd.DataFrame(bet_rows)
+
+        stake = 10.0
+        total_staked = len(bet_df) * stake
+        total_returned = sum(stake * row["odds"] if row["actual_win"] else 0
+                             for _, row in bet_df.iterrows())
+        roi = ((total_returned - total_staked) / total_staked) * 100
+        win_rate = bet_df["actual_win"].mean()
+
+        roi_mean, roi_lower, roi_upper = bootstrap_roi_ci(bet_df, stake=stake)
+
+        consensus_results[min_consensus] = {
+            "bets": len(bet_df),
+            "win_rate": win_rate,
+            "roi": roi,
+            "roi_ci": (roi_lower, roi_upper),
+        }
+
+    # Print consensus results
+    max_strategies = len(trained_strategies)
+    print(f"\n{'Min Consensus':<15} {'Bets':>5} {'Win%':>6} {'ROI':>8} {'95% CI':>20}")
+    print("-" * 58)
+    for n, res in consensus_results.items():
+        ci = f"[{res['roi_ci'][0]:+.1f}%, {res['roi_ci'][1]:+.1f}%]"
+        label = f"{n} of N"
+        print(f"{label:<15} {res['bets']:>5} {res['win_rate']:>5.0%} {res['roi']:>+7.1f}% {ci:>20}")
+
+    # --- Verdict ---
+    print("\n" + "=" * 60)
+    print("VERDICT")
+    print("=" * 60)
+
+    # Best individual
+    best_individual = max(strategy_results.values(), key=lambda x: x["roi"])
+    print(f"Best individual:  {best_individual['name']} ({best_individual['roi']:+.1f}% ROI, {best_individual['bets']} bets)")
+
+    # Best consensus
+    best_consensus_n = max(consensus_results.keys(),
+                            key=lambda n: consensus_results[n]["roi"] if consensus_results[n]["bets"] > 0 else -999)
+    best_consensus = consensus_results[best_consensus_n]
+    if best_consensus["bets"] > 0:
+        print(f"Best consensus:   {best_consensus_n} of N ({best_consensus['roi']:+.1f}% ROI, {best_consensus['bets']} bets)")
+        improvement = best_consensus["roi"] - best_individual["roi"]
+        print(f"Improvement:      {improvement:+.1f}% ROI over best individual")
+
+        if improvement > 0:
+            print("\n>>> CONSENSUS IMPROVES ROI -- proceed with UI integration <<<")
+        else:
+            print("\n>>> CONSENSUS DOES NOT IMPROVE ROI -- review strategy selection <<<")
+    else:
+        print("Best consensus:   No bets found at any threshold")
+        print("\n>>> INSUFFICIENT DATA for consensus verdict <<<")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(
@@ -674,6 +987,8 @@ Examples:
   python run_backtest.py --leagues "Premier League,Eliteserien"
         """
     )
+    parser.add_argument("--multi-strategy", action="store_true",
+                        help="Run multi-strategy consensus backtest (trains all 4 strategies)")
     parser.add_argument("--in-sample", action="store_true",
                         help="Run in-sample backtest (not recommended)")
     parser.add_argument("--holdout-seasons", type=int, default=1,
@@ -707,7 +1022,13 @@ Examples:
             league_filter = [l.strip() for l in args.leagues.split(",")]
             print(f"Using custom league filter: {league_filter}")
 
-    if args.in_sample:
+    if args.multi_strategy:
+        run_multi_strategy_backtest(
+            holdout_seasons=args.holdout_seasons,
+            exclude_cups=args.exclude_cups,
+            league_filter=league_filter,
+        )
+    elif args.in_sample:
         run_in_sample_backtest()
     else:
         run_out_of_sample_backtest(

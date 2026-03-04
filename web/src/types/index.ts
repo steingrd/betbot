@@ -18,6 +18,13 @@ export interface MatchResult {
   away_team: string
 }
 
+export interface StrategySignal {
+  strategy: string
+  prob: number
+  edge: number
+  is_value: boolean
+}
+
 export interface Prediction {
   home_team: string
   away_team: string
@@ -30,6 +37,49 @@ export interface Prediction {
   odds_home: number | null
   odds_draw: number | null
   odds_away: number | null
+  consensus_count: number | null
+  total_strategies: number | null
+  signals: StrategySignal[] | null
+}
+
+export interface SafePick {
+  home_team: string
+  away_team: string
+  league: string | null
+  kickoff: string
+  predicted_outcome: string
+  avg_prob: number
+  consensus_count: number
+  total_strategies: number
+  odds: number | null
+  strategy_probs: Record<string, number>
+}
+
+export interface Accumulator {
+  size: number
+  combined_odds: number
+  min_prob: number
+  avg_prob: number
+  picks: SafePick[]
+}
+
+export interface ConfidentGoalPick {
+  home_team: string
+  away_team: string
+  league: string | null
+  kickoff: string
+  market: string
+  avg_prob: number
+  consensus_count: number
+  total_strategies: number
+  strategy_probs: Record<string, number>
+}
+
+export interface AllPredictions {
+  value_bets: Prediction[]
+  safe_picks: SafePick[]
+  accumulators: Accumulator[]
+  confident_goals: ConfidentGoalPick[]
 }
 
 export interface ChatMessage {
