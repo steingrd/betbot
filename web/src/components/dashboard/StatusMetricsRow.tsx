@@ -116,7 +116,7 @@ export function StatusMetricsRow({ status, loading, betSummary, betLoading = fal
         footer={betSummary?.active_amount ? kr(betSummary.active_amount) + ' i spill' : undefined}
         description={betSummary ? [
           betSummary.max_potential_payout > 0 ? `Maks gevinst: ${kr(betSummary.max_potential_payout)}` : null,
-          betSummary.latest_kickoff ? `Siste kamp: ${new Date(betSummary.latest_kickoff).toLocaleString('no-NO', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : null,
+          betSummary.latest_kickoff ? `Siste kamp: ${new Date(betSummary.latest_kickoff).toISOString().slice(0, 10)}` : null,
         ].filter(Boolean).join(' · ') || `${betSummary.win_count + betSummary.loss_count} avgjorte totalt` : 'Plasserte spill'}
         loading={betLoading}
       />

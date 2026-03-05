@@ -329,7 +329,7 @@ class DailyPicksFinder:
                 continue
 
             odds = self.convert_nt_probs_to_odds(match)
-            kickoff_str = match.kickoff.strftime("%d.%m %H:%M") if match.kickoff else "--:--"
+            kickoff_str = match.kickoff.strftime("%Y-%m-%d %H:%M") if match.kickoff else "--:--"
 
             # Build a fake matches_df for strategies that need it
             match_df = pd.DataFrame([{
