@@ -101,3 +101,79 @@ export interface TaskStarted {
   task_id: string
   task_type: string
 }
+
+export interface AccumulatorLegRecord {
+  id: number
+  bet_id: number
+  match_id: string | null
+  market: string
+  home_team: string
+  away_team: string
+  kickoff: string | null
+  odds: number | null
+  result: string
+}
+
+export interface BetRecord {
+  id: number
+  match_id: string | null
+  bet_type: string
+  market: string | null
+  home_team: string | null
+  away_team: string | null
+  kickoff: string | null
+  league: string | null
+  odds: number
+  amount: number
+  model_prob: number | null
+  edge: number | null
+  consensus_count: number | null
+  status: string
+  payout: number | null
+  profit: number | null
+  created_at: string
+  settled_at: string | null
+  legs: AccumulatorLegRecord[] | null
+}
+
+export interface BetSummary {
+  active_count: number
+  active_amount: number
+  max_potential_payout: number
+  latest_kickoff: string | null
+  total_staked: number
+  total_payout: number
+  net_profit: number
+  roi_pct: number
+  win_count: number
+  loss_count: number
+}
+
+export interface PlacedBetRef {
+  match_id: string | null
+  market: string | null
+  bet_type: string
+}
+
+export interface BetInput {
+  match_id?: string | null
+  bet_type: string
+  market?: string | null
+  home_team?: string | null
+  away_team?: string | null
+  kickoff?: string | null
+  league?: string | null
+  odds: number
+  amount: number
+  model_prob?: number | null
+  edge?: number | null
+  consensus_count?: number | null
+  legs?: {
+    match_id?: string | null
+    market: string
+    home_team: string
+    away_team: string
+    kickoff?: string | null
+    odds?: number | null
+  }[]
+}

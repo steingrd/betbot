@@ -5,11 +5,13 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import type { DataStatus } from '@/types'
+import type { BetSummary, DataStatus } from '@/types'
 
 interface Props {
   status: DataStatus | null
   loading: boolean
+  betSummary?: BetSummary | null
+  betLoading?: boolean
 }
 
 function MetricCard({
@@ -66,9 +68,10 @@ function MetricCard({
   return card
 }
 
-export function StatusMetricsRow({ status, loading }: Props) {
+export function StatusMetricsRow({ status, loading, betSummary, betLoading = false }: Props) {
   const fmt = (n: number | null) => (n != null ? n.toLocaleString('nb-NO') : '-')
   const pct = (n: number | null) => (n != null ? `${(n * 100).toFixed(1)}%` : '-')
+  const kr = (n: number | null | undefined) => (n != null ? `${n.toLocaleString('nb-NO', { maximumFractionDigits: 0 })} kr` : '-')
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -95,6 +98,23 @@ export function StatusMetricsRow({ status, loading }: Props) {
             <p>BTTS: {pct(status?.acc_btts ?? null)}</p>
           </div>
         }
+      />
+      <MetricCard
+        label="Aktive spill"
+        value={betSummary ? String(betSummary.active_count) : '-'}
+        footer={betSummary?.active_amount ? kr(betSummary.active_amount) + ' i spill' : undefined}
+        description={betSummary ? [
+          betSummary.max_potential_payout > 0 ? `Maks gevinst: ${kr(betSummary.max_potential_payout)}` : null,
+          betSummary.latest_kickoff ? `Siste kamp: ${new Date(betSummary.latest_kickoff).toLocaleString('no-NO', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}` : null,
+        ].filter(Boolean).join(' · ') || `${betSummary.win_count + betSummary.loss_count} avgjorte totalt` : 'Plasserte spill'}
+        loading={betLoading}
+      />
+      <MetricCard
+        label="Totalregnskap"
+        value={betSummary ? kr(betSummary.net_profit) : '-'}
+        footer={betSummary ? `ROI: ${betSummary.roi_pct.toFixed(1)}%` : undefined}
+        description={betSummary ? `${betSummary.win_count}V / ${betSummary.loss_count}T` : 'Netto gevinst/tap'}
+        loading={betLoading}
       />
     </div>
   )

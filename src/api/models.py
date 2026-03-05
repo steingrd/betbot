@@ -94,6 +94,84 @@ class TaskStarted(BaseModel):
     task_type: str
 
 
+class BetInput(BaseModel):
+    match_id: str | None = None
+    bet_type: str = "single"
+    market: str | None = None
+    home_team: str | None = None
+    away_team: str | None = None
+    kickoff: str | None = None
+    league: str | None = None
+    odds: float
+    amount: float
+    model_prob: float | None = None
+    edge: float | None = None
+    consensus_count: int | None = None
+    legs: list["AccumulatorLegInput"] | None = None
+
+
+class AccumulatorLegInput(BaseModel):
+    match_id: str | None = None
+    market: str
+    home_team: str
+    away_team: str
+    kickoff: str | None = None
+    odds: float | None = None
+
+
+class AccumulatorLeg(BaseModel):
+    id: int
+    bet_id: int
+    match_id: str | None
+    market: str
+    home_team: str
+    away_team: str
+    kickoff: str | None
+    odds: float | None
+    result: str
+
+
+class BetRecord(BaseModel):
+    id: int
+    match_id: str | None
+    bet_type: str
+    market: str | None
+    home_team: str | None
+    away_team: str | None
+    kickoff: str | None
+    league: str | None
+    odds: float
+    amount: float
+    model_prob: float | None
+    edge: float | None
+    consensus_count: int | None
+    status: str
+    payout: float | None
+    profit: float | None
+    created_at: str
+    settled_at: str | None
+    legs: list[AccumulatorLeg] | None = None
+
+
+class BetSummary(BaseModel):
+    active_count: int
+    active_amount: float
+    max_potential_payout: float = 0.0
+    latest_kickoff: str | None = None
+    total_staked: float
+    total_payout: float
+    net_profit: float
+    roi_pct: float
+    win_count: int
+    loss_count: int
+
+
+class PlacedBetRef(BaseModel):
+    match_id: str | None
+    market: str | None
+    bet_type: str
+
+
 class ChatMessageRequest(BaseModel):
     content: str
 
