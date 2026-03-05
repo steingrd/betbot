@@ -40,7 +40,7 @@ export function ResultsCard({ results, loading }: Props) {
                 <TableRow>
                   <TableHead className="text-xs">Dato</TableHead>
                   <TableHead className="text-xs">Liga</TableHead>
-                  <TableHead className="text-xs">Hjemme</TableHead>
+                  <TableHead className="text-xs text-right">Hjemme</TableHead>
                   <TableHead className="text-xs text-center">Score</TableHead>
                   <TableHead className="text-xs">Borte</TableHead>
                 </TableRow>
@@ -54,7 +54,7 @@ export function ResultsCard({ results, loading }: Props) {
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]">
                       {r.league || '-'}
                     </TableCell>
-                    <TableCell className="text-xs truncate max-w-[120px]">
+                    <TableCell className="text-xs text-right truncate max-w-[120px]">
                       {r.home_team}
                     </TableCell>
                     <TableCell className="text-center">
