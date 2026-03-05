@@ -19,13 +19,15 @@ function MetricCard({
   value,
   footer,
   description,
+  children,
   loading,
   tooltip,
 }: {
   label: string
-  value: string
+  value?: string
   footer?: string
   description?: string
+  children?: React.ReactNode
   loading: boolean
   tooltip?: React.ReactNode
 }) {
@@ -39,6 +41,8 @@ function MetricCard({
       <CardContent className="pb-0">
         {loading ? (
           <Skeleton className="h-8 w-24 my-1" />
+        ) : children ? (
+          children
         ) : (
           <p className="text-3xl font-bold tracking-tight">{value}</p>
         )}
@@ -84,21 +88,28 @@ export function StatusMetricsRow({ status, loading, betSummary, betLoading = fal
       />
       <MetricCard
         label="Modell"
-        value={status?.model_version ?? '-'}
-        description={
-          status?.acc_1x2 != null
-            ? `1X2 ${pct(status.acc_1x2)} | O2.5 ${pct(status.acc_over25 ?? null)} | BTTS ${pct(status.acc_btts ?? null)}`
-            : 'Trent modell'
-        }
+        description={status?.model_version ?? 'Trent modell'}
         loading={loading}
-        tooltip={
-          <div className="text-xs space-y-1">
-            <p>1X2: {pct(status?.acc_1x2 ?? null)}</p>
-            <p>Over 2.5: {pct(status?.acc_over25 ?? null)}</p>
-            <p>BTTS: {pct(status?.acc_btts ?? null)}</p>
+      >
+        {status?.acc_1x2 != null ? (
+          <div className="flex gap-4 py-1">
+            <div>
+              <p className="text-3xl font-bold tracking-tight">{pct(status.acc_1x2)}</p>
+              <p className="text-xs text-muted-foreground">1X2</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold tracking-tight">{pct(status.acc_over25 ?? null)}</p>
+              <p className="text-xs text-muted-foreground">O2.5</p>
+            </div>
+            <div>
+              <p className="text-3xl font-bold tracking-tight">{pct(status.acc_btts ?? null)}</p>
+              <p className="text-xs text-muted-foreground">BTTS</p>
+            </div>
           </div>
-        }
-      />
+        ) : (
+          <p className="text-3xl font-bold tracking-tight">-</p>
+        )}
+      </MetricCard>
       <MetricCard
         label="Aktive spill"
         value={betSummary ? String(betSummary.active_count) : '-'}
