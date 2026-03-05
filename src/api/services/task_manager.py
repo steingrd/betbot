@@ -82,7 +82,7 @@ class TaskManager:
 
     def _run_task(self, task_id: str, task_type: TaskType, **kwargs) -> None:
         """Entry point for the background thread."""
-        from src.tui.tasks import (
+        from src.services.tasks import (
             DownloadError,
             DownloadFinished,
             PredictionError,
@@ -175,7 +175,7 @@ def _cache_predictions(event) -> None:
 
 def _serialize_event(event: Any) -> dict:
     """Convert a Message event to a JSON-serializable dict."""
-    from src.tui.tasks import (
+    from src.services.tasks import (
         DownloadFinished,
         DownloadProgress,
         PredictionFinished,

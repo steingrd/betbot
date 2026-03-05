@@ -368,7 +368,7 @@ class ConsensusEngine:
 
 ### Phase 4: Training Pipeline Update
 
-**File: `src/tui/tasks.py` -- update `run_training()`**
+**File: `src/services/tasks.py` -- update `run_training()`**
 
 Feature generation dominates training time (25 min full rebuild vs ~20s for all models). Progress bands must reflect this:
 
@@ -597,7 +597,7 @@ Consensus improvement: +9.8% ROI over best individual
 - [ ] **DECISION POINT:** If consensus does not improve ROI, stop here
 
 ### Phase 6: Training + Prediction Pipeline Integration
-- [ ] Update `src/tui/tasks.py` `run_training()` for sequential multi-strategy training
+- [ ] Update `src/services/tasks.py` `run_training()` for sequential multi-strategy training
 - [ ] Add per-strategy progress events (strategy_index, strategy_total)
 - [ ] Handle partial failure (continue on error)
 - [ ] Run backtest at training time, store in training report
@@ -673,7 +673,7 @@ Consensus improvement: +9.8% ROI over best individual
 - `src/strategies/logreg_strategy.py`
 
 ### Modified files
-- `src/tui/tasks.py` -- multi-strategy training loop
+- `src/services/tasks.py` -- multi-strategy training loop
 - `src/predictions/daily_picks.py` -- consensus prediction pipeline
 - `src/api/routes/predictions.py` -- updated response format
 - `src/api/routes/data.py` -- strategy status

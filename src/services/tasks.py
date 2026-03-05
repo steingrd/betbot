@@ -1,9 +1,7 @@
-"""TaskQueue - FIFO task queue with background download/training integration.
+"""Background task runners for download, training, and predictions.
 
 Business logic functions (run_download, run_training, run_predictions) use
-generic callbacks so they can be driven by both the TUI (Textual) and the
-Web API (FastAPI).  The Textual Message subclasses are kept for TUI
-compatibility and also serve as plain dataclasses for the API layer.
+generic callbacks so they can be driven by the Web API (FastAPI).
 """
 
 from __future__ import annotations
@@ -22,13 +20,12 @@ from typing import Any, Callable, Optional, Protocol
 
 import numpy as np
 import pandas as pd
-from textual.message import Message
 
 
 # --- Callback protocol ---
 
 ProgressCallback = Callable[[Any], None]
-"""Signature: on_progress(event) where event is one of the Message dataclasses below."""
+"""Signature: on_progress(event) where event is one of the dataclasses below."""
 
 CancelledCheck = Callable[[], bool]
 """Signature: is_cancelled() -> bool"""
@@ -59,34 +56,80 @@ class DownloadResult:
         return self.error is None
 
 
-# --- Textual Messages for thread-safe UI updates ---
-# These also serve as plain event objects for the API layer.
+# --- Progress/completion/error events ---
 
 
-class DownloadProgress(Message):
-    """Posted from worker thread to update UI on each season."""
+@dataclass
+class DownloadProgress:
+    """Emitted from worker thread on each season download."""
 
-    def __init__(self, result: DownloadResult, completed: int, total: int) -> None:
-        self.result = result
-        self.completed = completed
-        self.total = total
-        super().__init__()
-
-
-class DownloadFinished(Message):
-    """Posted when the entire download queue is done."""
-
-    def __init__(self, results: list[DownloadResult]) -> None:
-        self.results = results
-        super().__init__()
+    result: DownloadResult
+    completed: int
+    total: int
 
 
-class DownloadError(Message):
-    """Posted when the download fails fatally (e.g. no API key)."""
+@dataclass
+class DownloadFinished:
+    """Emitted when the entire download queue is done."""
 
-    def __init__(self, error: str) -> None:
-        self.error = error
-        super().__init__()
+    results: list[DownloadResult]
+
+
+@dataclass
+class DownloadError:
+    """Emitted when the download fails fatally."""
+
+    error: str
+
+
+@dataclass
+class TrainingProgress:
+    """Emitted from worker thread to report training progress."""
+
+    step: str
+    detail: str
+    percent: int | None = None
+
+
+@dataclass
+class TrainingFinished:
+    """Emitted when training is complete."""
+
+    report: dict
+
+
+@dataclass
+class TrainingError:
+    """Emitted when training fails fatally."""
+
+    error: str
+
+
+@dataclass
+class PredictionProgress:
+    """Emitted from worker thread to report prediction progress."""
+
+    step: str
+    detail: str
+
+
+@dataclass
+class PredictionFinished:
+    """Emitted when predictions are complete."""
+
+    picks: list
+    match_count: int
+    stale_warning: str | None = None
+    safe_picks: list = field(default_factory=list)
+    accumulators: list = field(default_factory=list)
+    confident_goals: list = field(default_factory=list)
+
+
+@dataclass
+class PredictionError:
+    """Emitted when predictions fail fatally."""
+
+    error: str
 
 
 def stable_league_id(country: str, league_name: str) -> int:
@@ -277,76 +320,6 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
         return DownloadResult(task=task, error=str(e))
 
 
-# --- Training Messages ---
-
-
-class TrainingProgress(Message):
-    """Posted from worker thread to update UI on training progress."""
-
-    def __init__(self, step: str, detail: str, percent: int | None = None) -> None:
-        self.step = step
-        self.detail = detail
-        self.percent = percent
-        super().__init__()
-
-
-class TrainingFinished(Message):
-    """Posted when training is complete."""
-
-    def __init__(self, report: dict) -> None:
-        self.report = report
-        super().__init__()
-
-
-class TrainingError(Message):
-    """Posted when training fails fatally."""
-
-    def __init__(self, error: str) -> None:
-        self.error = error
-        super().__init__()
-
-
-# --- Prediction Messages ---
-
-
-class PredictionProgress(Message):
-    """Posted from worker thread to update UI on prediction progress."""
-
-    def __init__(self, step: str, detail: str) -> None:
-        self.step = step
-        self.detail = detail
-        super().__init__()
-
-
-class PredictionFinished(Message):
-    """Posted when predictions are complete."""
-
-    def __init__(
-        self,
-        picks: list,
-        match_count: int,
-        stale_warning: str | None = None,
-        safe_picks: list | None = None,
-        accumulators: list | None = None,
-        confident_goals: list | None = None,
-    ) -> None:
-        self.picks = picks
-        self.match_count = match_count
-        self.stale_warning = stale_warning
-        self.safe_picks = safe_picks or []
-        self.accumulators = accumulators or []
-        self.confident_goals = confident_goals or []
-        super().__init__()
-
-
-class PredictionError(Message):
-    """Posted when predictions fail fatally."""
-
-    def __init__(self, error: str) -> None:
-        self.error = error
-        super().__init__()
-
-
 def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
     """Run prediction pipeline.
 
@@ -461,7 +434,7 @@ class _ProgressWriter(io.TextIOBase):
 def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
     """Run feature engineering + model training.
 
-    Uses generic callbacks so it can be driven by TUI or API.
+    Uses generic callbacks so it can be driven by the API.
     """
     from src.data.data_processor import DataProcessor
     from src.features.cache_metadata import (
@@ -788,5 +761,13 @@ def run_download(
         results.append(result)
 
         on_progress(DownloadProgress(result=result, completed=i + 1, total=len(tasks)))
+
+    # Settle any pending bets against new results
+    try:
+        from src.data.bet_repository import BetRepository
+        repo = BetRepository(db_path=processor.db_path)
+        repo.settle_bets()
+    except Exception:
+        pass  # Don't fail download because of bet settlement
 
     on_progress(DownloadFinished(results=results))
