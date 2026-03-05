@@ -1,12 +1,10 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { TrendingUp } from 'lucide-react'
 import type { DataStatus } from '@/types'
 
 interface Props {
@@ -17,7 +15,6 @@ interface Props {
 function MetricCard({
   label,
   value,
-  badge,
   footer,
   description,
   loading,
@@ -25,7 +22,6 @@ function MetricCard({
 }: {
   label: string
   value: string
-  badge?: string
   footer?: string
   description?: string
   loading: boolean
@@ -34,17 +30,9 @@ function MetricCard({
   const card = (
     <Card>
       <CardHeader className="pb-0">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {label}
-          </CardTitle>
-          {badge && (
-            <Badge variant="secondary" className="text-xs gap-1 font-normal">
-              <TrendingUp className="h-3 w-3" />
-              {badge}
-            </Badge>
-          )}
-        </div>
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          {label}
+        </CardTitle>
       </CardHeader>
       <CardContent className="pb-0">
         {loading ? (
@@ -88,27 +76,17 @@ export function StatusMetricsRow({ status, loading }: Props) {
         label="Kamper"
         value={fmt(status?.total_matches ?? null)}
         footer={status?.latest_date ? `Sist oppdatert ${status.latest_date}` : undefined}
-        description="Totalt antall kamper i databasen"
-        loading={loading}
-      />
-      <MetricCard
-        label="Ligaer"
-        value={fmt(status?.league_count ?? null)}
-        description="Aktive ligaer med data"
+        description={status?.league_count ? `${fmt(status.league_count)} ligaer` : 'Totalt antall kamper'}
         loading={loading}
       />
       <MetricCard
         label="Modell"
         value={status?.model_version ?? '-'}
-        description="Trent XGBoost-modell"
-        loading={loading}
-      />
-      <MetricCard
-        label="Presisjon (1X2)"
-        value={pct(status?.acc_1x2 ?? null)}
-        badge={status?.acc_1x2 != null ? pct(status.acc_1x2) : undefined}
-        footer={status?.acc_over25 != null ? `Over 2.5: ${pct(status.acc_over25)}` : undefined}
-        description={status?.acc_btts != null ? `BTTS: ${pct(status.acc_btts)}` : 'Modellpresisjon'}
+        description={
+          status?.acc_1x2 != null
+            ? `1X2 ${pct(status.acc_1x2)} | O2.5 ${pct(status.acc_over25 ?? null)} | BTTS ${pct(status.acc_btts ?? null)}`
+            : 'Trent modell'
+        }
         loading={loading}
         tooltip={
           <div className="text-xs space-y-1">

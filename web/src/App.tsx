@@ -10,12 +10,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { ChatPanel } from '@/components/chat/ChatPanel'
 import { StatusMetricsRow } from '@/components/dashboard/StatusMetricsRow'
-import { ActionsBar } from '@/components/dashboard/ActionsBar'
-import { PredictionsCard } from '@/components/predictions/PredictionsCard'
-import { SafePicksCard } from '@/components/predictions/SafePicksCard'
-import { ConfidentGoalsCard } from '@/components/predictions/ConfidentGoalsCard'
-import { ResultsCard } from '@/components/dashboard/ResultsCard'
-import { EventLog, type LogEntry } from '@/components/dashboard/EventLog'
+import { ActionButtons, TaskProgressBar } from '@/components/dashboard/ActionsBar'
+import { PredictionsTabs } from '@/components/predictions/PredictionsTabs'
 import { useChat } from '@/hooks/useChat'
 import { useTaskStream } from '@/hooks/useTaskStream'
 import { useDataStatus } from '@/hooks/useDataStatus'
@@ -24,6 +20,13 @@ import { usePredictions } from '@/hooks/usePredictions'
 import { api } from '@/lib/api'
 import type { Accumulator, ConfidentGoalPick, Prediction, SafePick } from '@/types'
 import { Circle, MessageSquare } from 'lucide-react'
+
+interface LogEntry {
+  id: string
+  time: string
+  message: string
+  level: 'info' | 'success' | 'warning' | 'error'
+}
 
 let logId = 0
 
@@ -44,7 +47,7 @@ function App() {
     loading: predictionsLoading,
     refresh: refreshPredictions,
   } = usePredictions()
-  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [, setLogs] = useState<LogEntry[]>([])
   const [chatOpen, setChatOpen] = useState(false)
 
   const addLog = useCallback((message: string, level: LogEntry['level'] = 'info') => {
@@ -127,15 +130,6 @@ function App() {
       } else {
         addLog(`Ingen value bets funnet (${r.match_count} kamper analysert)`, 'info')
       }
-      if (r.safe_picks?.length) {
-        addLog(`${r.safe_picks.length} sikre picks, ${r.accumulators?.length || 0} kombispill`, 'success')
-      }
-      if (r.confident_goals?.length) {
-        addLog(`${r.confident_goals.length} sikre BTTS/O2.5 picks`, 'success')
-      }
-      if (r.stale_warning) {
-        addLog(r.stale_warning, 'warning')
-      }
     }
 
     setTimeout(() => {
@@ -147,23 +141,25 @@ function App() {
     prevFinishedRef.current = false
   }
 
-  // Log task progress
-  const prevProgressRef = useRef<string | null>(null)
-  if (task.progress && task.progress.detail !== prevProgressRef.current) {
-    prevProgressRef.current = task.progress.detail
-    addLog(task.progress.detail, 'info')
-  }
-
   return (
     <TooltipProvider>
       <div className="min-h-screen bg-background text-foreground">
-        {/* Header */}
+        {/* Header with action buttons */}
         <header className="border-b px-4 py-2.5 flex items-center gap-2 sticky top-0 bg-background/95 backdrop-blur z-40">
           <span className="font-bold text-lg">BetBot</span>
           <Circle
             className={`h-2 w-2 ${chat.connected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`}
           />
           <div className="flex-1" />
+          <ActionButtons
+            taskId={task.taskId}
+            taskType={task.type}
+            finished={task.finished}
+            error={task.error}
+            onDownload={handleDownload}
+            onTrain={handleTrain}
+            onPredict={handlePredict}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -174,56 +170,36 @@ function App() {
           </Button>
         </header>
 
+        {/* Progress bar under header */}
+        <TaskProgressBar
+          taskId={task.taskId}
+          progress={task.progress}
+          error={task.error}
+          finished={task.finished}
+          onCancel={handleCancel}
+        />
+
+        {task.error && (
+          <div className="px-4 py-1.5 bg-destructive/10 border-b">
+            <p className="text-xs text-destructive">{task.error}</p>
+          </div>
+        )}
+
         {/* Dashboard content */}
         <div className="px-6 py-4 space-y-4">
           {/* Status metrics */}
           <StatusMetricsRow status={status} loading={statusLoading} />
 
-          {/* Actions */}
-          <ActionsBar
-            taskId={task.taskId}
-            taskType={task.type}
-            progress={task.progress}
-            error={task.error}
-            finished={task.finished}
-            onDownload={handleDownload}
-            onTrain={handleTrain}
-            onPredict={handlePredict}
-            onCancel={handleCancel}
+          {/* Predictions tabs */}
+          <PredictionsTabs
+            predictions={predictions}
+            safePicks={safePicks}
+            accumulators={accumulators}
+            confidentGoals={confidentGoals}
+            predictionsLoading={predictionsLoading}
+            results={results}
+            resultsLoading={resultsLoading}
           />
-
-          {/* Two-column grid: predictions + results */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
-              <PredictionsCard
-                predictions={predictions}
-                loading={predictionsLoading}
-              />
-            </div>
-            <div className="lg:col-span-2">
-              <ResultsCard results={results} loading={resultsLoading} />
-            </div>
-          </div>
-
-          {/* Second row: safe picks + confident goals */}
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            <div className="lg:col-span-3">
-              <SafePicksCard
-                safePicks={safePicks}
-                accumulators={accumulators}
-                loading={predictionsLoading}
-              />
-            </div>
-            <div className="lg:col-span-2">
-              <ConfidentGoalsCard
-                confidentGoals={confidentGoals}
-                loading={predictionsLoading}
-              />
-            </div>
-          </div>
-
-          {/* Event log (collapsible) */}
-          <EventLog entries={logs} />
         </div>
 
         {/* Chat Sheet */}
