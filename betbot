@@ -16,7 +16,18 @@ elif [ -z "$VIRTUAL_ENV" ]; then
     source .venv/bin/activate
 fi
 
-if [ "$1" = "--web" ]; then
+if [ "$1" = "--dev" ]; then
+    shift
+    echo "Starting BetBot in dev mode..."
+    echo "  Backend:  http://localhost:8000 (API)"
+    echo "  Frontend: http://localhost:5173 (åpne denne)"
+    # Start backend in background, then Vite dev server in foreground
+    python scripts/run_web.py "$@" &
+    BACKEND_PID=$!
+    trap "kill $BACKEND_PID 2>/dev/null" EXIT
+    cd "$SCRIPT_DIR/web"
+    exec npx vite
+elif [ "$1" = "--web" ]; then
     shift
     echo "Starting BetBot Web UI on http://localhost:8000"
     exec python scripts/run_web.py "$@"
