@@ -25,15 +25,15 @@ interface Props {
 function statusBadge(status: string) {
   switch (status) {
     case 'won':
-      return <Badge className="bg-green-600 text-xs">Vunnet</Badge>
+      return <Badge className="bg-green-600">Vunnet</Badge>
     case 'lost':
-      return <Badge variant="destructive" className="text-xs">Tapt</Badge>
+      return <Badge variant="destructive">Tapt</Badge>
     case 'pending':
-      return <Badge variant="secondary" className="text-xs">Aktiv</Badge>
+      return <Badge variant="secondary">Aktiv</Badge>
     case 'cancelled':
-      return <Badge variant="outline" className="text-xs text-muted-foreground">Kansellert</Badge>
+      return <Badge variant="outline" className="text-muted-foreground">Kansellert</Badge>
     default:
-      return <Badge variant="secondary" className="text-xs">{status}</Badge>
+      return <Badge variant="secondary">{status}</Badge>
   }
 }
 
@@ -115,15 +115,15 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-xs w-6"></TableHead>
-                    <TableHead className="text-xs">Dato</TableHead>
-                    <TableHead className="text-xs">Kamp</TableHead>
-                    <TableHead className="text-xs">Marked</TableHead>
-                    <TableHead className="text-xs text-right">Odds</TableHead>
-                    <TableHead className="text-xs text-right">Innsats</TableHead>
-                    <TableHead className="text-xs text-center">Status</TableHead>
-                    <TableHead className="text-xs text-right">Resultat</TableHead>
-                    <TableHead className="text-xs w-8"></TableHead>
+                    <TableHead className="w-6"></TableHead>
+                    <TableHead>Dato</TableHead>
+                    <TableHead>Kamp</TableHead>
+                    <TableHead>Marked</TableHead>
+                    <TableHead className="text-right">Odds</TableHead>
+                    <TableHead className="text-right">Innsats</TableHead>
+                    <TableHead className="text-center">Status</TableHead>
+                    <TableHead className="text-right">Resultat</TableHead>
+                    <TableHead className="w-8"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -138,38 +138,38 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
                           }
                         }}
                       >
-                        <TableCell className="text-xs px-1">
+                        <TableCell className="px-1">
                           {bet.bet_type === 'accumulator' && (
                             expandedId === bet.id
                               ? <ChevronDown className="h-3 w-3" />
                               : <ChevronRight className="h-3 w-3" />
                           )}
                         </TableCell>
-                        <TableCell className="text-xs font-mono whitespace-nowrap">
+                        <TableCell className="font-mono whitespace-nowrap">
                           {formatDate(
                             bet.bet_type === 'accumulator' && bet.legs?.length
                               ? bet.legs.reduce((latest, leg) => leg.kickoff && leg.kickoff > latest ? leg.kickoff : latest, bet.legs[0].kickoff ?? bet.created_at)
                               : bet.kickoff ?? bet.created_at
                           )}
                         </TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
+                        <TableCell className="whitespace-nowrap">
                           {bet.bet_type === 'accumulator'
                             ? `Kombi (${bet.legs?.length ?? 0} kamper)`
                             : `${bet.home_team} vs ${bet.away_team}`}
                         </TableCell>
-                        <TableCell className="text-xs font-medium">
+                        <TableCell className="font-medium">
                           {bet.bet_type === 'accumulator' ? '-' : translateMarket(bet.market)}
                         </TableCell>
-                        <TableCell className="text-right text-xs font-mono">
+                        <TableCell className="text-right font-mono">
                           {bet.odds.toFixed(2)}
                         </TableCell>
-                        <TableCell className="text-right text-xs font-mono">
+                        <TableCell className="text-right font-mono">
                           {bet.amount} kr
                         </TableCell>
                         <TableCell className="text-center">
                           {statusBadge(bet.status)}
                         </TableCell>
-                        <TableCell className={`text-right text-xs font-mono font-medium ${profitColor(bet.profit)}`}>
+                        <TableCell className={`text-right font-mono font-medium ${profitColor(bet.profit)}`}>
                           {bet.profit != null
                             ? `${bet.profit >= 0 ? '+' : ''}${bet.profit.toFixed(0)} kr`
                             : '-'}
@@ -194,12 +194,12 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
                       {bet.bet_type === 'accumulator' && expandedId === bet.id && bet.legs?.map((leg) => (
                         <TableRow key={`leg-${leg.id}`} className="bg-muted/30">
                           <TableCell></TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{leg.kickoff}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell className="text-muted-foreground">{leg.kickoff}</TableCell>
+                          <TableCell className="text-muted-foreground">
                             {leg.home_team} vs {leg.away_team}
                           </TableCell>
-                          <TableCell className="text-xs">{translateMarket(leg.market)}</TableCell>
-                          <TableCell className="text-right text-xs font-mono text-muted-foreground">
+                          <TableCell>{translateMarket(leg.market)}</TableCell>
+                          <TableCell className="text-right font-mono text-muted-foreground">
                             {leg.odds?.toFixed(2) ?? '-'}
                           </TableCell>
                           <TableCell></TableCell>

@@ -95,28 +95,28 @@ export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _pl
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-xs">Tid</TableHead>
-                      <TableHead className="text-xs">Kamp</TableHead>
-                      <TableHead className="text-xs">Liga</TableHead>
-                      <TableHead className="text-xs">Utfall</TableHead>
-                      <TableHead className="text-xs text-right">Odds</TableHead>
-                      <TableHead className="text-xs text-right">Modell</TableHead>
-                      <TableHead className="text-xs text-center">Enighet</TableHead>
+                      <TableHead>Tid</TableHead>
+                      <TableHead>Kamp</TableHead>
+                      <TableHead>Liga</TableHead>
+                      <TableHead>Utfall</TableHead>
+                      <TableHead className="text-right">Odds</TableHead>
+                      <TableHead className="text-right">Modell</TableHead>
+                      <TableHead className="text-center">Enighet</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {(selectedAccumulator?.picks || safePicks).map((p, i) => (
                       <TableRow key={i} className={selectedAccumulator && i < selectedAccumulator.size ? '' : 'opacity-50'}>
-                        <TableCell className="font-mono text-xs whitespace-nowrap">{p.kickoff}</TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
+                        <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {p.home_team} vs {p.away_team}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                        <TableCell className="text-xs font-medium">{translateMarket(p.predicted_outcome)}</TableCell>
-                        <TableCell className="text-right text-xs font-mono text-muted-foreground">
+                        <TableCell className="text-muted-foreground">{p.league}</TableCell>
+                        <TableCell className="font-medium">{translateMarket(p.predicted_outcome)}</TableCell>
+                        <TableCell className="text-right font-mono text-muted-foreground">
                           {p.odds != null ? p.odds.toFixed(2) : '-'}
                         </TableCell>
-                        <TableCell className="text-right text-xs">
+                        <TableCell className="text-right">
                           <span className={p.avg_prob >= 0.7 ? 'text-green-600 dark:text-green-400' : ''}>
                             {(p.avg_prob * 100).toFixed(1)}%
                           </span>
@@ -127,7 +127,7 @@ export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _pl
                               <span>
                                 <Badge
                                   variant={p.consensus_count === p.total_strategies ? 'default' : 'secondary'}
-                                  className="text-xs cursor-default"
+                                  className="cursor-default"
                                 >
                                   {p.consensus_count}/{p.total_strategies}
                                 </Badge>

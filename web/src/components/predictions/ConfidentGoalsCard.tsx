@@ -67,24 +67,24 @@ export function ConfidentGoalsCard({ confidentGoals, loading }: Props) {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="text-xs">Tid</TableHead>
-                      <TableHead className="text-xs">Kamp</TableHead>
-                      <TableHead className="text-xs">Liga</TableHead>
-                      <TableHead className="text-xs">Marked</TableHead>
-                      <TableHead className="text-xs text-right">Modell</TableHead>
-                      <TableHead className="text-xs text-center">Enighet</TableHead>
+                      <TableHead>Tid</TableHead>
+                      <TableHead>Kamp</TableHead>
+                      <TableHead>Liga</TableHead>
+                      <TableHead>Marked</TableHead>
+                      <TableHead className="text-right">Modell</TableHead>
+                      <TableHead className="text-center">Enighet</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {confidentGoals.map((p, i) => (
                       <TableRow key={i}>
-                        <TableCell className="font-mono text-xs whitespace-nowrap">{p.kickoff}</TableCell>
-                        <TableCell className="text-xs whitespace-nowrap">
+                        <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
+                        <TableCell className="whitespace-nowrap">
                           {p.home_team} vs {p.away_team}
                         </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                        <TableCell className="text-xs font-medium">{translateMarket(p.market)}</TableCell>
-                        <TableCell className={`text-right text-xs font-medium ${probColor(p.avg_prob)}`}>
+                        <TableCell className="text-muted-foreground">{p.league}</TableCell>
+                        <TableCell className="font-medium">{translateMarket(p.market)}</TableCell>
+                        <TableCell className={`text-right font-medium ${probColor(p.avg_prob)}`}>
                           {(p.avg_prob * 100).toFixed(1)}%
                         </TableCell>
                         <TableCell className="text-center">
@@ -93,7 +93,7 @@ export function ConfidentGoalsCard({ confidentGoals, loading }: Props) {
                               <span>
                                 <Badge
                                   variant={p.consensus_count === p.total_strategies ? 'default' : 'secondary'}
-                                  className="text-xs cursor-default"
+                                  className="cursor-default"
                                 >
                                   {p.consensus_count}/{p.total_strategies}
                                 </Badge>

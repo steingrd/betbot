@@ -58,16 +58,16 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs">Tid</TableHead>
-              <TableHead className="text-xs">Kamp</TableHead>
-              <TableHead className="text-xs">Liga</TableHead>
-              <TableHead className="text-xs">Market</TableHead>
-              <TableHead className="text-xs text-right">H</TableHead>
-              <TableHead className="text-xs text-right">U</TableHead>
-              <TableHead className="text-xs text-right">B</TableHead>
-              <TableHead className="text-xs text-right">Modell</TableHead>
-              <TableHead className="text-xs text-right">Edge</TableHead>
-              <TableHead className="text-xs text-center">Enighet</TableHead>
+              <TableHead>Tid</TableHead>
+              <TableHead>Kamp</TableHead>
+              <TableHead>Liga</TableHead>
+              <TableHead>Market</TableHead>
+              <TableHead className="text-right">H</TableHead>
+              <TableHead className="text-right">U</TableHead>
+              <TableHead className="text-right">B</TableHead>
+              <TableHead className="text-right">Modell</TableHead>
+              <TableHead className="text-right">Edge</TableHead>
+              <TableHead className="text-center">Enighet</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -77,25 +77,25 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
                 className={`${onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isPlaced(p, placedIds) ? 'bg-green-500/10' : ''}`}
                 onClick={() => onRowClick?.(p)}
               >
-                <TableCell className="font-mono text-xs whitespace-nowrap">{p.kickoff}</TableCell>
-                <TableCell className="text-xs whitespace-nowrap">
+                <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
+                <TableCell className="whitespace-nowrap">
                   {p.home_team} vs {p.away_team}
                 </TableCell>
-                <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                <TableCell className="text-xs font-medium">{translateMarket(p.market)}</TableCell>
-                <TableCell className="text-right text-xs font-mono text-muted-foreground">
+                <TableCell className="text-muted-foreground">{p.league}</TableCell>
+                <TableCell className="font-medium">{translateMarket(p.market)}</TableCell>
+                <TableCell className="text-right font-mono text-muted-foreground">
                   {fmtOdds(p.odds_home)}
                 </TableCell>
-                <TableCell className="text-right text-xs font-mono text-muted-foreground">
+                <TableCell className="text-right font-mono text-muted-foreground">
                   {fmtOdds(p.odds_draw)}
                 </TableCell>
-                <TableCell className="text-right text-xs font-mono text-muted-foreground">
+                <TableCell className="text-right font-mono text-muted-foreground">
                   {fmtOdds(p.odds_away)}
                 </TableCell>
-                <TableCell className="text-right text-xs">
+                <TableCell className="text-right">
                   {p.model_prob != null ? `${(p.model_prob * 100).toFixed(1)}%` : '-'}
                 </TableCell>
-                <TableCell className={`text-right text-xs font-medium ${edgeColor(p.edge)}`}>
+                <TableCell className={`text-right font-medium ${edgeColor(p.edge)}`}>
                   {p.edge != null ? `${(p.edge * 100).toFixed(1)}%` : '-'}
                 </TableCell>
                 <TableCell className="text-center">
@@ -105,7 +105,7 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
                         <span>
                           <Badge
                             variant={consensusBadgeVariant(p.consensus_count, p.total_strategies)}
-                            className="text-xs cursor-default"
+                            className="cursor-default"
                           >
                             {p.consensus_count}/{p.total_strategies}
                           </Badge>
@@ -121,7 +121,7 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
                       </TooltipContent>
                     </Tooltip>
                   ) : (
-                    <span className="text-xs text-muted-foreground">-</span>
+                    <span className="text-muted-foreground">-</span>
                   )}
                 </TableCell>
               </TableRow>

@@ -38,31 +38,31 @@ export function ResultsCard({ results, loading }: Props) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs">Dato</TableHead>
-                  <TableHead className="text-xs">Liga</TableHead>
-                  <TableHead className="text-xs text-right">Hjemme</TableHead>
-                  <TableHead className="text-xs text-center">Score</TableHead>
-                  <TableHead className="text-xs">Borte</TableHead>
+                  <TableHead>Dato</TableHead>
+                  <TableHead>Liga</TableHead>
+                  <TableHead className="text-right">Hjemme</TableHead>
+                  <TableHead className="text-center">Score</TableHead>
+                  <TableHead>Borte</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {results.map((r, i) => (
                   <TableRow key={i}>
-                    <TableCell className="text-xs font-mono whitespace-nowrap">
+                    <TableCell className="font-mono whitespace-nowrap">
                       {r.date}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]">
+                    <TableCell className="text-muted-foreground truncate max-w-[100px]">
                       {r.league || '-'}
                     </TableCell>
-                    <TableCell className="text-xs text-right truncate max-w-[120px]">
+                    <TableCell className="text-right truncate max-w-[120px]">
                       {r.home_team}
                     </TableCell>
                     <TableCell className="text-center">
-                      <Badge variant="secondary" className="text-xs font-mono px-1.5">
+                      <Badge variant="secondary" className="font-mono px-1.5">
                         {r.home_goals}-{r.away_goals}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-xs truncate max-w-[120px]">
+                    <TableCell className="truncate max-w-[120px]">
                       {r.away_team}
                     </TableCell>
                   </TableRow>
