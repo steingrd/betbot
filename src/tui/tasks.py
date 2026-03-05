@@ -465,7 +465,8 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     """
     from src.data.data_processor import DataProcessor
     from src.features.cache_metadata import (
-        compute_source_fingerprint,
+        compute_per_match_fingerprints,
+        compute_cache_diff,
         read_cache_metadata,
         validate_cache_metadata,
         write_cache_metadata,
@@ -521,29 +522,41 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     metadata_path = features_path.with_suffix(".meta.json")
     cached_df = None
     skip_ids = None
-    source_fingerprint = compute_source_fingerprint(matches)
+    current_fingerprints = compute_per_match_fingerprints(matches)
     if features_path.exists():
         try:
             metadata = read_cache_metadata(metadata_path)
             cache_ok, reason = validate_cache_metadata(
                 metadata,
                 feature_version=FeatureEngineer.FEATURE_VERSION,
-                source_fingerprint=source_fingerprint,
             )
             if cache_ok:
                 cached_df = pd.read_csv(features_path)
                 # Validate that cached features have the expected columns
                 expected_cols = set(MatchPredictor.FEATURE_COLS)
                 if expected_cols.issubset(set(cached_df.columns)):
-                    skip_ids = set(cached_df["match_id"].tolist())
-                    new_match_count = len(matches) - len(skip_ids & set(matches["id"].tolist()))
-                    on_progress(
-                        TrainingProgress(
-                            step="Features",
-                            detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
-                            percent=7,
+                    cached_fingerprints = metadata.get("match_fingerprints", {})
+                    skip_ids, changed_ids = compute_cache_diff(cached_fingerprints, current_fingerprints)
+                    if changed_ids:
+                        # Existing data changed — must regenerate all
+                        cached_df = None
+                        skip_ids = None
+                        on_progress(
+                            TrainingProgress(
+                                step="Features",
+                                detail=f"Cache invalidert ({len(changed_ids)} kamper endret)",
+                                percent=7,
+                            )
                         )
-                    )
+                    else:
+                        new_match_count = len(matches) - len(skip_ids)
+                        on_progress(
+                            TrainingProgress(
+                                step="Features",
+                                detail=f"Cache: {len(skip_ids):,} kamper, {new_match_count:,} nye",
+                                percent=7,
+                            )
+                        )
                 else:
                     cached_df = None  # Column mismatch - regenerate all
             else:
@@ -609,7 +622,7 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     write_cache_metadata(
         output_path.with_suffix(".meta.json"),
         feature_version=FeatureEngineer.FEATURE_VERSION,
-        source_fingerprint=source_fingerprint,
+        match_fingerprints=current_fingerprints,
         match_count=len(matches),
     )
 

@@ -34,7 +34,8 @@ def print_progress(current, total, start_time=[None]):
 
 from data.data_processor import DataProcessor
 from features.cache_metadata import (
-    compute_source_fingerprint,
+    compute_per_match_fingerprints,
+    compute_cache_diff,
     read_cache_metadata,
     validate_cache_metadata,
     write_cache_metadata,
@@ -440,7 +441,7 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
     # Load or generate features (with caching)
     features_cache = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
     features_metadata = features_cache.with_suffix(".meta.json")
-    source_fingerprint = compute_source_fingerprint(matches)
+    current_fingerprints = compute_per_match_fingerprints(matches)
     expected_cols = set(MatchPredictor.FEATURE_COLS)
     need_regenerate = True
     features = None
@@ -451,19 +452,44 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
         cache_ok, reason = validate_cache_metadata(
             metadata,
             feature_version=FeatureEngineer.FEATURE_VERSION,
-            source_fingerprint=source_fingerprint,
         )
         if not cache_ok:
             print(f"Cache invalidated ({reason})")
         else:
             features = pd.read_csv(features_cache)
-            print(f"Loaded {len(features)} cached features")
             if (
                 expected_cols.issubset(set(features.columns))
                 and "season_id" in features.columns
                 and "league_id" in features.columns
             ):
-                need_regenerate = False
+                cached_fingerprints = metadata.get("match_fingerprints", {})
+                skip_ids, changed_ids = compute_cache_diff(cached_fingerprints, current_fingerprints)
+                if changed_ids:
+                    print(f"Cache invalidated ({len(changed_ids)} matches changed)")
+                elif len(skip_ids) == len(current_fingerprints):
+                    need_regenerate = False
+                    print(f"Loaded {len(features)} cached features")
+                else:
+                    # Incremental: generate only new matches
+                    new_count = len(current_fingerprints) - len(skip_ids)
+                    print(f"Cache: {len(skip_ids)} cached, {new_count} new matches")
+                    engineer = FeatureEngineer(matches)
+                    new_features = engineer.generate_features(
+                        progress_callback=print_progress, skip_match_ids=skip_ids
+                    )
+                    print()
+                    if len(new_features) > 0:
+                        features = pd.concat([features, new_features], ignore_index=True)
+                        features = features.drop_duplicates(subset=["match_id"], keep="last")
+                    features.to_csv(features_cache, index=False)
+                    write_cache_metadata(
+                        features_metadata,
+                        feature_version=FeatureEngineer.FEATURE_VERSION,
+                        match_fingerprints=current_fingerprints,
+                        match_count=len(matches),
+                    )
+                    need_regenerate = False
+                    print(f"Updated cache: {len(features)} total features")
             else:
                 print("Cache invalidated (missing required feature columns)")
 
@@ -476,7 +502,7 @@ def run_out_of_sample_backtest(holdout_seasons: int = 1, exclude_cups: bool = Fa
         write_cache_metadata(
             features_metadata,
             feature_version=FeatureEngineer.FEATURE_VERSION,
-            source_fingerprint=source_fingerprint,
+            match_fingerprints=current_fingerprints,
             match_count=len(matches),
         )
         print(f"Generated and cached {len(features)} features to {features_cache.name}")
@@ -697,7 +723,7 @@ def run_multi_strategy_backtest(holdout_seasons: int = 1, exclude_cups: bool = F
     # Load or generate features (with caching)
     features_cache = Path(__file__).parent.parent / "data" / "processed" / "features.csv"
     features_metadata = features_cache.with_suffix(".meta.json")
-    source_fingerprint = compute_source_fingerprint(matches)
+    current_fingerprints = compute_per_match_fingerprints(matches)
     expected_cols = set(MatchPredictor.FEATURE_COLS)
     need_regenerate = True
     features = None
@@ -708,15 +734,39 @@ def run_multi_strategy_backtest(holdout_seasons: int = 1, exclude_cups: bool = F
         cache_ok, reason = validate_cache_metadata(
             metadata,
             feature_version=FeatureEngineer.FEATURE_VERSION,
-            source_fingerprint=source_fingerprint,
         )
         if cache_ok:
             features = pd.read_csv(features_cache)
             if (expected_cols.issubset(set(features.columns))
                     and "season_id" in features.columns
                     and "league_id" in features.columns):
-                need_regenerate = False
-                print(f"Loaded {len(features)} cached features")
+                cached_fingerprints = metadata.get("match_fingerprints", {})
+                skip_ids, changed_ids = compute_cache_diff(cached_fingerprints, current_fingerprints)
+                if changed_ids:
+                    print(f"Cache invalidated ({len(changed_ids)} matches changed)")
+                elif len(skip_ids) == len(current_fingerprints):
+                    need_regenerate = False
+                    print(f"Loaded {len(features)} cached features")
+                else:
+                    new_count = len(current_fingerprints) - len(skip_ids)
+                    print(f"Cache: {len(skip_ids)} cached, {new_count} new matches")
+                    engineer = FeatureEngineer(matches)
+                    new_features = engineer.generate_features(
+                        progress_callback=print_progress, skip_match_ids=skip_ids
+                    )
+                    print()
+                    if len(new_features) > 0:
+                        features = pd.concat([features, new_features], ignore_index=True)
+                        features = features.drop_duplicates(subset=["match_id"], keep="last")
+                    features.to_csv(features_cache, index=False)
+                    write_cache_metadata(
+                        features_metadata,
+                        feature_version=FeatureEngineer.FEATURE_VERSION,
+                        match_fingerprints=current_fingerprints,
+                        match_count=len(matches),
+                    )
+                    need_regenerate = False
+                    print(f"Updated cache: {len(features)} total features")
 
     if need_regenerate:
         print(f"\nGenerating features...")
@@ -727,7 +777,7 @@ def run_multi_strategy_backtest(holdout_seasons: int = 1, exclude_cups: bool = F
         write_cache_metadata(
             features_metadata,
             feature_version=FeatureEngineer.FEATURE_VERSION,
-            source_fingerprint=source_fingerprint,
+            match_fingerprints=current_fingerprints,
             match_count=len(matches),
         )
 
