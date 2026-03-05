@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .routes import chat, data, predictions, tasks
+from .routes import bets, chat, data, predictions, tasks
 from .services.task_manager import TaskManager
 
 # Ensure src/ is importable
@@ -51,6 +51,7 @@ app.add_middleware(
 )
 
 # API routes
+app.include_router(bets.router)
 app.include_router(data.router)
 app.include_router(tasks.router)
 app.include_router(predictions.router)

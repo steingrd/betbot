@@ -108,6 +108,9 @@ def _load_predictions() -> list[dict] | None:
         return None
     try:
         with open(cache_path) as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data.get("value_bets", [])
+        return data
     except Exception:
         return None

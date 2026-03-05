@@ -4,14 +4,16 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { PredictionsTable } from './PredictionsTable'
 import { TrendingUp } from 'lucide-react'
-import type { Prediction } from '@/types'
+import type { PlacedBetRef, Prediction } from '@/types'
 
 interface Props {
   predictions: Prediction[]
   loading: boolean
+  placedIds?: PlacedBetRef[]
+  onRowClick?: (prediction: Prediction) => void
 }
 
-export function PredictionsCard({ predictions, loading }: Props) {
+export function PredictionsCard({ predictions, loading, placedIds, onRowClick }: Props) {
   const [minConsensus, setMinConsensus] = useState('2')
 
   const hasConsensusData = predictions.some((p) => p.consensus_count != null)
@@ -83,7 +85,7 @@ export function PredictionsCard({ predictions, loading }: Props) {
           </div>
         ) : (
           <div className="px-4 pb-4">
-            <PredictionsTable predictions={filtered} />
+            <PredictionsTable predictions={filtered} placedIds={placedIds} onRowClick={onRowClick} />
           </div>
         )}
       </CardContent>

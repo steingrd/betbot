@@ -13,10 +13,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import type { Prediction } from '@/types'
+import type { PlacedBetRef, Prediction } from '@/types'
 
 interface Props {
   predictions: Prediction[]
+  placedIds?: PlacedBetRef[]
+  onRowClick?: (prediction: Prediction) => void
+}
+
+function isPlaced(p: Prediction, placedIds: PlacedBetRef[]): boolean {
+  return placedIds.some(
+    (ref) =>
+      ref.bet_type === 'single' &&
+      ref.market === p.market &&
+      ref.match_id === `${p.home_team}_vs_${p.away_team}`
+  )
 }
 
 function edgeColor(edge: number | null): string {
@@ -39,7 +50,7 @@ function consensusBadgeVariant(count: number | null, total: number | null): 'def
   return 'destructive'
 }
 
-export function PredictionsTable({ predictions }: Props) {
+export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Props) {
   return (
     <TooltipProvider>
       <div className="overflow-x-auto">
@@ -60,7 +71,11 @@ export function PredictionsTable({ predictions }: Props) {
           </TableHeader>
           <TableBody>
             {predictions.map((p, i) => (
-              <TableRow key={i}>
+              <TableRow
+                key={i}
+                className={`${onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isPlaced(p, placedIds) ? 'bg-green-500/10' : ''}`}
+                onClick={() => onRowClick?.(p)}
+              >
                 <TableCell className="font-mono text-xs whitespace-nowrap">{p.kickoff}</TableCell>
                 <TableCell className="text-xs whitespace-nowrap">
                   {p.home_team} vs {p.away_team}

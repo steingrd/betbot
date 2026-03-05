@@ -3,7 +3,8 @@ import { PredictionsCard } from './PredictionsCard'
 import { SafePicksCard } from './SafePicksCard'
 import { ConfidentGoalsCard } from './ConfidentGoalsCard'
 import { ResultsCard } from '@/components/dashboard/ResultsCard'
-import type { Accumulator, ConfidentGoalPick, MatchResult, Prediction, SafePick } from '@/types'
+import { CouponsCard } from '@/components/bets/CouponsCard'
+import type { Accumulator, BetRecord, ConfidentGoalPick, MatchResult, PlacedBetRef, Prediction, SafePick } from '@/types'
 
 interface Props {
   predictions: Prediction[]
@@ -13,6 +14,12 @@ interface Props {
   predictionsLoading: boolean
   results: MatchResult[]
   resultsLoading: boolean
+  placedIds?: PlacedBetRef[]
+  bets?: BetRecord[]
+  betsLoading?: boolean
+  onPredictionClick?: (prediction: Prediction) => void
+  onAccumulatorClick?: (accumulator: Accumulator) => void
+  onCancelBet?: (id: number) => void
 }
 
 export function PredictionsTabs({
@@ -23,6 +30,12 @@ export function PredictionsTabs({
   predictionsLoading,
   results,
   resultsLoading,
+  placedIds,
+  bets = [],
+  betsLoading = false,
+  onPredictionClick,
+  onAccumulatorClick,
+  onCancelBet,
 }: Props) {
   return (
     <Tabs defaultValue="value-bets">
@@ -45,6 +58,12 @@ export function PredictionsTabs({
             <span className="ml-1 text-xs text-muted-foreground">({confidentGoals.length})</span>
           )}
         </TabsTrigger>
+        <TabsTrigger value="kuponger">
+          Kuponger
+          {bets.length > 0 && (
+            <span className="ml-1 text-xs text-muted-foreground">({bets.length})</span>
+          )}
+        </TabsTrigger>
         <TabsTrigger value="resultater">
           Resultater
           {results.length > 0 && (
@@ -53,13 +72,27 @@ export function PredictionsTabs({
         </TabsTrigger>
       </TabsList>
       <TabsContent value="value-bets">
-        <PredictionsCard predictions={predictions} loading={predictionsLoading} />
+        <PredictionsCard
+          predictions={predictions}
+          loading={predictionsLoading}
+          placedIds={placedIds}
+          onRowClick={onPredictionClick}
+        />
       </TabsContent>
       <TabsContent value="kombispill">
-        <SafePicksCard safePicks={safePicks} accumulators={accumulators} loading={predictionsLoading} />
+        <SafePicksCard
+          safePicks={safePicks}
+          accumulators={accumulators}
+          loading={predictionsLoading}
+          placedIds={placedIds}
+          onAccumulatorClick={onAccumulatorClick}
+        />
       </TabsContent>
       <TabsContent value="btts">
         <ConfidentGoalsCard confidentGoals={confidentGoals} loading={predictionsLoading} />
+      </TabsContent>
+      <TabsContent value="kuponger">
+        <CouponsCard bets={bets} loading={betsLoading} onCancel={onCancelBet ?? (() => {})} />
       </TabsContent>
       <TabsContent value="resultater">
         <ResultsCard results={results} loading={resultsLoading} />

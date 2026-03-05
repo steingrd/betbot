@@ -18,15 +18,17 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { Layers } from 'lucide-react'
-import type { Accumulator, SafePick } from '@/types'
+import type { Accumulator, PlacedBetRef, SafePick } from '@/types'
 
 interface Props {
   safePicks: SafePick[]
   accumulators: Accumulator[]
   loading: boolean
+  placedIds?: PlacedBetRef[]
+  onAccumulatorClick?: (accumulator: Accumulator) => void
 }
 
-export function SafePicksCard({ safePicks, accumulators, loading }: Props) {
+export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _placedIds, onAccumulatorClick }: Props) {
   const availableSizes = accumulators.map((a) => String(a.size))
   const [selectedSize, setSelectedSize] = useState<string>(availableSizes[0] || '4')
 
@@ -162,6 +164,17 @@ export function SafePicksCard({ safePicks, accumulators, loading }: Props) {
                 <span className="font-mono font-medium text-foreground">
                   {(selectedAccumulator.avg_prob * 100).toFixed(1)}%
                 </span>
+                {onAccumulatorClick && (
+                  <>
+                    <span className="mx-1">|</span>
+                    <button
+                      onClick={() => onAccumulatorClick(selectedAccumulator)}
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Plasser spill
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>

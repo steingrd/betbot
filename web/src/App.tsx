@@ -12,11 +12,13 @@ import { ChatPanel } from '@/components/chat/ChatPanel'
 import { StatusMetricsRow } from '@/components/dashboard/StatusMetricsRow'
 import { ActionButtons, TaskProgressBar } from '@/components/dashboard/ActionsBar'
 import { PredictionsTabs } from '@/components/predictions/PredictionsTabs'
+import { BetModal } from '@/components/bets/BetModal'
 import { useChat } from '@/hooks/useChat'
 import { useTaskStream } from '@/hooks/useTaskStream'
 import { useDataStatus } from '@/hooks/useDataStatus'
 import { useResults } from '@/hooks/useResults'
 import { usePredictions } from '@/hooks/usePredictions'
+import { useBets } from '@/hooks/useBets'
 import { api } from '@/lib/api'
 import type { Accumulator, ConfidentGoalPick, Prediction, SafePick } from '@/types'
 import { Circle, MessageSquare } from 'lucide-react'
@@ -47,8 +49,12 @@ function App() {
     loading: predictionsLoading,
     refresh: refreshPredictions,
   } = usePredictions()
+  const { summary: betSummary, bets, placedIds, loading: betsLoading, refresh: refreshBets, placeBet, cancelBet } = useBets()
   const [, setLogs] = useState<LogEntry[]>([])
   const [chatOpen, setChatOpen] = useState(false)
+  const [betModalOpen, setBetModalOpen] = useState(false)
+  const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null)
+  const [selectedAccumulator, setSelectedAccumulator] = useState<Accumulator | null>(null)
 
   const addLog = useCallback((message: string, level: LogEntry['level'] = 'info') => {
     const now = new Date()
@@ -106,6 +112,7 @@ function App() {
     refreshStatus()
     refreshResults()
     refreshPredictions()
+    refreshBets()
 
     if (task.type === 'download' && task.result) {
       const r = task.result as { ok: number; skipped: number; matches: number; failed: number }
@@ -188,7 +195,7 @@ function App() {
         {/* Dashboard content */}
         <div className="px-6 py-4 space-y-4">
           {/* Status metrics */}
-          <StatusMetricsRow status={status} loading={statusLoading} />
+          <StatusMetricsRow status={status} loading={statusLoading} betSummary={betSummary} betLoading={betsLoading} />
 
           {/* Predictions tabs */}
           <PredictionsTabs
@@ -199,8 +206,31 @@ function App() {
             predictionsLoading={predictionsLoading}
             results={results}
             resultsLoading={resultsLoading}
+            placedIds={placedIds}
+            bets={bets}
+            betsLoading={betsLoading}
+            onPredictionClick={(p) => {
+              setSelectedPrediction(p)
+              setSelectedAccumulator(null)
+              setBetModalOpen(true)
+            }}
+            onAccumulatorClick={(a) => {
+              setSelectedAccumulator(a)
+              setSelectedPrediction(null)
+              setBetModalOpen(true)
+            }}
+            onCancelBet={cancelBet}
           />
         </div>
+
+        {/* Bet Modal */}
+        <BetModal
+          open={betModalOpen}
+          onOpenChange={setBetModalOpen}
+          onPlace={placeBet}
+          prediction={selectedPrediction}
+          accumulator={selectedAccumulator}
+        />
 
         {/* Chat Sheet */}
         <Sheet open={chatOpen} onOpenChange={setChatOpen}>

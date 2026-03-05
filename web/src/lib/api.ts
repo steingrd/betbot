@@ -1,4 +1,4 @@
-import type { AllPredictions, DataStatus, MatchResult, Prediction, TaskStarted } from '@/types'
+import type { AllPredictions, BetInput, BetRecord, BetSummary, DataStatus, MatchResult, PlacedBetRef, Prediction, TaskStarted } from '@/types'
 
 const BASE = ''
 
@@ -30,4 +30,18 @@ export const api = {
     fetchJSON<{ role: string; content: string }[]>(`/api/chat/history?limit=${limit}`),
   clearChatHistory: () =>
     fetchJSON<{ status: string }>('/api/chat/history', { method: 'DELETE' }),
+
+  // Bets
+  placeBet: (bet: BetInput) =>
+    fetchJSON<{ id: number }>('/api/bets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bet),
+    }),
+  getBets: (status?: string, limit = 50) =>
+    fetchJSON<BetRecord[]>(`/api/bets?${new URLSearchParams({ ...(status ? { status } : {}), limit: String(limit) })}`),
+  getBetSummary: () => fetchJSON<BetSummary>('/api/bets/summary'),
+  getPlacedIds: () => fetchJSON<PlacedBetRef[]>('/api/bets/placed-ids'),
+  cancelBet: (id: number) =>
+    fetchJSON<{ status: string }>(`/api/bets/${id}`, { method: 'DELETE' }),
 }
