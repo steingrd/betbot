@@ -28,7 +28,7 @@ data/predictions/*
 !data/processed/.gitkeep
 !data/predictions/.gitkeep
 
-# Models (keep structure, ignore model files)
+# Models (ignore legacy root-level files only)
 models/*.pkl
 models/*.joblib
 models/*.json
