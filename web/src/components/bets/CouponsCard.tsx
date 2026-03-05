@@ -39,7 +39,12 @@ function statusBadge(status: string) {
 function formatDate(iso: string): string {
   try {
     const d = new Date(iso)
-    return d.toLocaleDateString('nb-NO', { day: '2-digit', month: '2-digit' })
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const hh = String(d.getHours()).padStart(2, '0')
+    const min = String(d.getMinutes()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd} ${hh}:${min}`
   } catch {
     return iso
   }
@@ -140,7 +145,11 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
                           )}
                         </TableCell>
                         <TableCell className="text-xs font-mono whitespace-nowrap">
-                          {formatDate(bet.created_at)}
+                          {formatDate(
+                            bet.bet_type === 'accumulator' && bet.legs?.length
+                              ? bet.legs.reduce((latest, leg) => leg.kickoff && leg.kickoff > latest ? leg.kickoff : latest, bet.legs[0].kickoff ?? bet.created_at)
+                              : bet.kickoff ?? bet.created_at
+                          )}
                         </TableCell>
                         <TableCell className="text-xs whitespace-nowrap">
                           {bet.bet_type === 'accumulator'
