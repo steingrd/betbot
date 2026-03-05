@@ -40,36 +40,11 @@ export function PredictionsTabs({
   return (
     <Tabs defaultValue="value-bets">
       <TabsList>
-        <TabsTrigger value="value-bets">
-          Value Bets
-          {predictions.length > 0 && (
-            <span className="ml-1 text-xs text-muted-foreground">({predictions.length})</span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="kombispill">
-          Kombispill
-          {accumulators.length > 0 && (
-            <span className="ml-1 text-xs text-muted-foreground">({accumulators.length})</span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="btts">
-          BTTS / O2.5
-          {confidentGoals.length > 0 && (
-            <span className="ml-1 text-xs text-muted-foreground">({confidentGoals.length})</span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="kuponger">
-          Kuponger
-          {bets.length > 0 && (
-            <span className="ml-1 text-xs text-muted-foreground">({bets.length})</span>
-          )}
-        </TabsTrigger>
-        <TabsTrigger value="resultater">
-          Resultater
-          {results.length > 0 && (
-            <span className="ml-1 text-xs text-muted-foreground">({results.length})</span>
-          )}
-        </TabsTrigger>
+        <TabsTrigger value="value-bets">Value Bets</TabsTrigger>
+        <TabsTrigger value="kombispill">Kombispill</TabsTrigger>
+        <TabsTrigger value="btts">BTTS / O2.5</TabsTrigger>
+        <TabsTrigger value="kuponger">Kuponger</TabsTrigger>
+        <TabsTrigger value="resultater">Resultater</TabsTrigger>
       </TabsList>
       <TabsContent value="value-bets">
         <PredictionsCard
