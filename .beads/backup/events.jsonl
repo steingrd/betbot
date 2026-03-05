@@ -1,1 +1,17 @@
 {"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:28:22Z","event_type":"created","id":1,"issue_id":"betbot-d7e","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:28:38Z","event_type":"created","id":2,"issue_id":"betbot-bei","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:28:59Z","event_type":"created","id":3,"issue_id":"betbot-4hx","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:30:39Z","event_type":"created","id":4,"issue_id":"betbot-5uw","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:31:02Z","event_type":"created","id":5,"issue_id":"betbot-b0l","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:31:17Z","event_type":"created","id":6,"issue_id":"betbot-okp","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:31:37Z","event_type":"created","id":7,"issue_id":"betbot-apa","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:32:04Z","event_type":"created","id":8,"issue_id":"betbot-eb3","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:32:18Z","event_type":"created","id":9,"issue_id":"betbot-zxf","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:32:56Z","event_type":"created","id":10,"issue_id":"betbot-2xt","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:33:16Z","event_type":"created","id":11,"issue_id":"betbot-qnz","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:35:09Z","event_type":"created","id":12,"issue_id":"betbot-duw","new_value":"","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:38:16Z","event_type":"status_changed","id":13,"issue_id":"betbot-qnz","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"betbot-qnz\",\"title\":\"Bruke Hjemme ikke Hjemmeseier i kombispill osv\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"bug\",\"owner\":\"steingrim@fiken.no\",\"created_at\":\"2026-03-05T09:33:16Z\",\"created_by\":\"Steingrim Dovland\",\"updated_at\":\"2026-03-05T09:33:16Z\"}"}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:38:16Z","event_type":"status_changed","id":14,"issue_id":"betbot-b0l","new_value":"{\"status\":\"in_progress\"}","old_value":"{\"id\":\"betbot-b0l\",\"title\":\"Fikse så det er norske tegn overalt, ikke 'Klikk pa en value bet' osv\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"bug\",\"owner\":\"steingrim@fiken.no\",\"created_at\":\"2026-03-05T09:31:03Z\",\"created_by\":\"Steingrim Dovland\",\"updated_at\":\"2026-03-05T09:31:03Z\"}"}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:39:26Z","event_type":"closed","id":15,"issue_id":"betbot-qnz","new_value":"Closed","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:39:26Z","event_type":"closed","id":16,"issue_id":"betbot-b0l","new_value":"Closed","old_value":""}
+{"actor":"Steingrim Dovland","comment":null,"created_at":"2026-03-05T10:39:33Z","event_type":"created","id":17,"issue_id":"betbot-9a5","new_value":"","old_value":""}
