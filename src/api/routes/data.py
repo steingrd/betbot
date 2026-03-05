@@ -15,7 +15,9 @@ router = APIRouter(prefix="/api/data", tags=["data"])
 
 BASE_DIR = Path(__file__).parent.parent.parent.parent
 DB_PATH = BASE_DIR / "data" / "processed" / "betbot.db"
-REPORT_PATH = BASE_DIR / "reports" / "latest_training_report.json"
+REPORTS_DIR = BASE_DIR / "reports"
+REPORT_PATH = REPORTS_DIR / "latest_training_report.json"
+ACTIVE_MODEL_PATH = BASE_DIR / "data" / "processed" / "active_model.txt"
 MODEL_DIR = BASE_DIR / "models"
 
 
@@ -43,15 +45,25 @@ def get_data_status() -> DataStatus:
         finally:
             conn.close()
 
-    # Model metrics from training report
+    # Model metrics from training report (prefer per-model report)
     model_version = None
     acc_1x2 = None
     acc_over25 = None
     acc_btts = None
 
-    if REPORT_PATH.exists():
+    report_path = REPORT_PATH
+    if ACTIVE_MODEL_PATH.exists():
         try:
-            with open(REPORT_PATH) as f:
+            active_slug = ACTIVE_MODEL_PATH.read_text().strip()
+            per_model = REPORTS_DIR / f"{active_slug}_training_report.json"
+            if per_model.exists():
+                report_path = per_model
+        except Exception:
+            pass
+
+    if report_path.exists():
+        try:
+            with open(report_path) as f:
                 report = json.load(f)
 
             version = report.get("steps", {}).get("save_models", {}).get("model_version")

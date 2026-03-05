@@ -759,6 +759,11 @@ def run_training(
     with open(latest_path, "w") as f:
         json.dump(report, f, indent=2, default=str)
 
+    # Per-model report so dashboard can show correct metrics per model
+    per_model_path = reports_dir / f"{model_slug}_training_report.json"
+    with open(per_model_path, "w") as f:
+        json.dump(report, f, indent=2, default=str)
+
     total_elapsed = time.time() - start_time
     report["total_duration_seconds"] = total_elapsed
 
