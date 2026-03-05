@@ -37,8 +37,8 @@ let logId = 0
 function App() {
   const chat = useChat()
   const task = useTaskStream()
-  const { models, activeSlug, setActive: setActiveModel, createModel, deleteModel, refresh: refreshModels } = useModels()
-  const { status, loading: statusLoading, refresh: refreshStatus } = useDataStatus()
+  const { models, activeSlug, setActive, createModel, deleteModel, refresh: refreshModels } = useModels()
+  const { status, loading: statusLoading, refresh: refreshStatus } = useDataStatus(activeSlug)
   const { results, loading: resultsLoading, refresh: refreshResults } = useResults()
   const {
     predictions,
@@ -58,11 +58,6 @@ function App() {
   const [betModalOpen, setBetModalOpen] = useState(false)
   const [selectedPrediction, setSelectedPrediction] = useState<Prediction | null>(null)
   const [selectedAccumulator, setSelectedAccumulator] = useState<Accumulator | null>(null)
-
-  const setActive = useCallback(async (slug: string) => {
-    await setActiveModel(slug)
-    refreshStatus()
-  }, [setActiveModel, refreshStatus])
 
   const addLog = useCallback((message: string, level: LogEntry['level'] = 'info') => {
     const now = new Date()

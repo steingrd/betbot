@@ -22,7 +22,7 @@ MODEL_DIR = BASE_DIR / "models"
 
 
 @router.get("/status")
-def get_data_status() -> DataStatus:
+def get_data_status(model_slug: str | None = Query(default=None)) -> DataStatus:
     total_matches = 0
     league_count = 0
     latest_date = None
@@ -52,14 +52,17 @@ def get_data_status() -> DataStatus:
     acc_btts = None
 
     report_path = REPORT_PATH
-    if ACTIVE_MODEL_PATH.exists():
+    # Try per-model report: explicit param > active_model.txt > fallback
+    slug = model_slug
+    if not slug and ACTIVE_MODEL_PATH.exists():
         try:
-            active_slug = ACTIVE_MODEL_PATH.read_text().strip()
-            per_model = REPORTS_DIR / f"{active_slug}_training_report.json"
-            if per_model.exists():
-                report_path = per_model
+            slug = ACTIVE_MODEL_PATH.read_text().strip()
         except Exception:
             pass
+    if slug:
+        per_model = REPORTS_DIR / f"{slug}_training_report.json"
+        if per_model.exists():
+            report_path = per_model
 
     if report_path.exists():
         try:

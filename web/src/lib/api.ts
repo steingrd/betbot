@@ -12,7 +12,7 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getDataStatus: () => fetchJSON<DataStatus>('/api/data/status'),
+  getDataStatus: (modelSlug?: string) => fetchJSON<DataStatus>(modelSlug ? `/api/data/status?model_slug=${encodeURIComponent(modelSlug)}` : '/api/data/status'),
   getResults: (limit = 20) => fetchJSON<MatchResult[]>(`/api/data/results?limit=${limit}`),
   getPredictions: () => fetchJSON<Prediction[]>('/api/predictions/latest'),
   getAllPredictions: () => fetchJSON<AllPredictions>('/api/predictions/all'),
