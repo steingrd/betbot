@@ -10,9 +10,11 @@ class DataStatus(BaseModel):
     league_count: int
     latest_date: str | None
     model_version: str | None
+    model_slug: str | None = None
     acc_1x2: float | None
     acc_over25: float | None
     acc_btts: float | None
+    num_strategies: int | None = None
 
 
 class MatchResult(BaseModel):

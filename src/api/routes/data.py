@@ -47,9 +47,11 @@ def get_data_status(model_slug: str | None = Query(default=None)) -> DataStatus:
 
     # Model metrics from training report (prefer per-model report)
     model_version = None
+    report_slug = None
     acc_1x2 = None
     acc_over25 = None
     acc_btts = None
+    num_strategies = None
 
     report_path = REPORT_PATH
     # Try per-model report: explicit param > active_model.txt > fallback
@@ -69,14 +71,24 @@ def get_data_status(model_slug: str | None = Query(default=None)) -> DataStatus:
             with open(report_path) as f:
                 report = json.load(f)
 
-            version = report.get("steps", {}).get("save_models", {}).get("model_version")
+            save_info = report.get("steps", {}).get("save_models", {})
+            version = save_info.get("model_version")
             if version:
                 model_version = version
+            report_slug = save_info.get("model_slug")
 
             perf = report.get("model_performance", {})
             acc_1x2 = perf.get("result_1x2", {}).get("accuracy")
             acc_over25 = perf.get("over_25", {}).get("accuracy")
             acc_btts = perf.get("btts", {}).get("accuracy")
+            # Use max num_strategies across markets
+            strat_counts = [
+                perf.get(m, {}).get("num_strategies")
+                for m in ("result_1x2", "over_25", "btts")
+            ]
+            strat_counts = [c for c in strat_counts if c is not None]
+            if strat_counts:
+                num_strategies = max(strat_counts)
         except Exception:
             pass
     elif not model_version:
@@ -90,9 +102,11 @@ def get_data_status(model_slug: str | None = Query(default=None)) -> DataStatus:
         league_count=league_count,
         latest_date=latest_date,
         model_version=model_version,
+        model_slug=report_slug,
         acc_1x2=acc_1x2,
         acc_over25=acc_over25,
         acc_btts=acc_btts,
+        num_strategies=num_strategies,
     )
 
 

@@ -3,9 +3,11 @@ export interface DataStatus {
   league_count: number
   latest_date: string | null
   model_version: string | null
+  model_slug: string | null
   acc_1x2: number | null
   acc_over25: number | null
   acc_btts: number | null
+  num_strategies: number | null
 }
 
 export interface MatchResult {

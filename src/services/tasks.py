@@ -686,14 +686,24 @@ def run_training(
                 percent=pct,
             ))
 
-    # Legacy model_performance for backwards compatibility
-    xgb_result = report["strategy_results"].get("xgboost", {})
-    if xgb_result.get("status") == "ok":
-        report["model_performance"] = {
-            "result_1x2": {"accuracy": xgb_result["accuracy"].get("result")},
-            "over_25": {"accuracy": xgb_result["accuracy"].get("over25")},
-            "btts": {"accuracy": xgb_result["accuracy"].get("btts")},
-        }
+    # Aggregate model_performance across all trained strategies
+    market_map = {"result_1x2": "result", "over_25": "over25", "btts": "btts"}
+    model_perf: dict[str, dict] = {}
+    for market_key, acc_key in market_map.items():
+        values = []
+        for sr in report["strategy_results"].values():
+            if sr.get("status") != "ok":
+                continue
+            val = sr.get("accuracy", {}).get(acc_key)
+            if val is not None:
+                values.append(val)
+        if values:
+            model_perf[market_key] = {
+                "accuracy": sum(values) / len(values),
+                "num_strategies": len(values),
+            }
+    if model_perf:
+        report["model_performance"] = model_perf
 
     on_progress(TrainingProgress(
         step="Trening",

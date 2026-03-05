@@ -88,7 +88,10 @@ export function StatusMetricsRow({ status, loading, betSummary, betLoading = fal
       />
       <MetricCard
         label="Modell"
-        description={status?.model_version ?? 'Trent modell'}
+        description={[
+          status?.model_version,
+          status?.num_strategies ? `${status.num_strategies} strategier` : null,
+        ].filter(Boolean).join(' · ') || 'Trent modell'}
         loading={loading}
       >
         {status?.acc_1x2 != null ? (
