@@ -320,7 +320,11 @@ def run_download_task(task: DownloadTask, client, processor) -> DownloadResult:
         return DownloadResult(task=task, error=str(e))
 
 
-def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
+def run_predictions(
+    on_progress: ProgressCallback,
+    is_cancelled: CancelledCheck,
+    model_slug: str = "standard",
+) -> None:
     """Run prediction pipeline.
 
     Loads model, fetches NT matches, computes features, predicts, finds value bets.
@@ -332,7 +336,7 @@ def run_predictions(on_progress: ProgressCallback, is_cancelled: CancelledCheck)
         from src.predictions.daily_picks import DailyPicksFinder
 
         finder = DailyPicksFinder()
-        finder.load_model()
+        finder.load_model(model_slug=model_slug)
     except Exception as e:
         on_progress(PredictionError(f"Kunne ikke laste modeller: {e}"))
         return
@@ -431,10 +435,19 @@ class _ProgressWriter(io.TextIOBase):
         pass
 
 
-def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) -> None:
+def run_training(
+    on_progress: ProgressCallback,
+    is_cancelled: CancelledCheck,
+    model_config: "ModelConfig | None" = None,
+) -> None:
     """Run feature engineering + model training.
 
     Uses generic callbacks so it can be driven by the API.
+
+    Args:
+        model_config: If provided, train only the strategies and data range
+            defined in this config. If None, train all strategies with all data
+            (backwards compatible).
     """
     from src.data.data_processor import DataProcessor
     from src.features.cache_metadata import (
@@ -446,6 +459,7 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     )
     from src.features.feature_engineering import FeatureEngineer
     from src.models.match_predictor import MatchPredictor
+    from src.models.model_config import ModelConfig
 
     start_time = time.time()
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -475,6 +489,17 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     if len(matches) == 0:
         on_progress(TrainingError("Ingen kamper i databasen - last ned data forst (/download)"))
         return
+
+    # Apply data filter (years cutoff) if model_config specifies it
+    if model_config and model_config.data_filter.years:
+        cutoff_unix = time.time() - (model_config.data_filter.years * 365.25 * 86400)
+        original_count = len(matches)
+        matches = matches[matches["date_unix"] >= cutoff_unix].copy()
+        on_progress(TrainingProgress(
+            step="Laster data",
+            detail=f"Filtrert til siste {model_config.data_filter.years} ar: {len(matches):,} av {original_count:,} kamper",
+            percent=3,
+        ))
 
     step_elapsed = time.time() - start_time
     report["steps"]["load_matches"] = {"duration_seconds": step_elapsed, "matches_loaded": len(matches)}
@@ -602,18 +627,29 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
     if is_cancelled():
         return
 
-    # Step 4: Train all strategies
-    from src.strategies import STRATEGIES
+    # Step 4: Train strategies (filtered by model_config if provided)
+    from src.strategies import STRATEGIES, get_strategies
     from src.strategies.base import StrategyTrainingError
 
     # Load matches with league info for strategies that need raw match data (Poisson, Elo)
     matches_with_league = processor.load_matches_with_league()
 
-    strategy_count = len(STRATEGIES)
+    # Apply same data filter to matches_with_league
+    if model_config and model_config.data_filter.years:
+        cutoff_unix = time.time() - (model_config.data_filter.years * 365.25 * 86400)
+        matches_with_league = matches_with_league[matches_with_league["date_unix"] >= cutoff_unix].copy()
+
+    # Select strategies based on model config
+    if model_config:
+        strategies_to_train = get_strategies(model_config.strategies)
+    else:
+        strategies_to_train = list(STRATEGIES)
+
+    strategy_count = len(strategies_to_train)
     trained_strategies = []
     report["strategy_results"] = {}
 
-    for idx, strategy in enumerate(STRATEGIES):
+    for idx, strategy in enumerate(strategies_to_train):
         if is_cancelled():
             return
 
@@ -673,17 +709,39 @@ def run_training(on_progress: ProgressCallback, is_cancelled: CancelledCheck) ->
 
     step_start = time.time()
     model_version = datetime.now().strftime("%Y%m%d_%H%M%S")
-    models_dir = Path(__file__).parent.parent.parent / "models"
-    models_dir.mkdir(parents=True, exist_ok=True)
+    models_root = Path(__file__).parent.parent.parent / "models"
+
+    # Determine target directory
+    if model_config:
+        model_slug = model_config.slug
+    else:
+        model_slug = "standard"
+
+    target_dir = models_root / model_slug
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     for strategy in trained_strategies:
         ext = "json" if strategy.slug in ("poisson", "elo") else "pkl"
-        strategy.save(models_dir / f"{strategy.slug}.{ext}")
+        strategy.save(target_dir / f"{strategy.slug}.{ext}")
+
+    # Save/update model config
+    if model_config:
+        model_config.save(models_root)
+    elif not (target_dir / "config.json").exists():
+        # Create default config for standard model
+        default_config = ModelConfig(
+            slug="standard",
+            name="Standard",
+            strategies=[s.slug for s in trained_strategies],
+            is_default=True,
+        )
+        default_config.save(models_root)
 
     step_elapsed = time.time() - step_start
     report["steps"]["save_models"] = {
         "duration_seconds": step_elapsed,
         "model_version": model_version,
+        "model_slug": model_slug,
         "strategies_saved": [s.slug for s in trained_strategies],
     }
 

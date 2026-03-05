@@ -29,20 +29,20 @@ def start_download(request: Request, full: bool = False) -> TaskStarted:
 
 
 @router.post("/train")
-def start_training(request: Request) -> TaskStarted:
+def start_training(request: Request, model_slug: str | None = None) -> TaskStarted:
     tm = get_task_manager(request)
     try:
-        task_id = tm.start_training()
+        task_id = tm.start_training(model_slug=model_slug)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return TaskStarted(task_id=task_id, task_type="train")
 
 
 @router.post("/predict")
-def start_predictions(request: Request) -> TaskStarted:
+def start_predictions(request: Request, model_slug: str | None = None) -> TaskStarted:
     tm = get_task_manager(request)
     try:
-        task_id = tm.start_predictions()
+        task_id = tm.start_predictions(model_slug=model_slug)
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
     return TaskStarted(task_id=task_id, task_type="predict")

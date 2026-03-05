@@ -128,6 +128,7 @@ export interface BetRecord {
   model_prob: number | null
   edge: number | null
   consensus_count: number | null
+  model_slug: string | null
   status: string
   payout: number | null
   profit: number | null
@@ -155,6 +156,16 @@ export interface PlacedBetRef {
   bet_type: string
 }
 
+export interface ModelInfo {
+  slug: string
+  name: string
+  strategies: string[]
+  years: number | null
+  is_default: boolean
+  created_at: string
+  is_trained: boolean
+}
+
 export interface BetInput {
   match_id?: string | null
   bet_type: string
@@ -168,6 +179,7 @@ export interface BetInput {
   model_prob?: number | null
   edge?: number | null
   consensus_count?: number | null
+  model_slug?: string | null
   legs?: {
     match_id?: string | null
     market: string

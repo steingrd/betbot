@@ -27,3 +27,20 @@ def get_fitted() -> list:
 def for_market(market: str) -> list:
     """Return strategies that support a given market."""
     return [s for s in STRATEGIES if market in s.supported_markets]
+
+
+def get_strategies(slugs: list[str]) -> list:
+    """Return fresh strategy instances for the given slugs."""
+    slug_to_cls = {
+        "xgboost": XGBoostStrategy,
+        "poisson": PoissonStrategy,
+        "elo": EloStrategy,
+        "logreg": LogRegStrategy,
+    }
+    result = []
+    for slug in slugs:
+        cls = slug_to_cls.get(slug)
+        if cls is None:
+            raise ValueError(f"Unknown strategy slug: {slug!r}")
+        result.append(cls())
+    return result

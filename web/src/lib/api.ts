@@ -1,4 +1,4 @@
-import type { AllPredictions, BetInput, BetRecord, BetSummary, DataStatus, MatchResult, PlacedBetRef, Prediction, TaskStarted } from '@/types'
+import type { AllPredictions, BetInput, BetRecord, BetSummary, DataStatus, MatchResult, ModelInfo, PlacedBetRef, Prediction, TaskStarted } from '@/types'
 
 const BASE = ''
 
@@ -19,10 +19,10 @@ export const api = {
 
   startDownload: (full = false) =>
     fetchJSON<TaskStarted>(`/api/tasks/download?full=${full}`, { method: 'POST' }),
-  startTraining: () =>
-    fetchJSON<TaskStarted>('/api/tasks/train', { method: 'POST' }),
-  startPredictions: () =>
-    fetchJSON<TaskStarted>('/api/tasks/predict', { method: 'POST' }),
+  startTraining: (modelSlug?: string) =>
+    fetchJSON<TaskStarted>(`/api/tasks/train${modelSlug ? `?model_slug=${modelSlug}` : ''}`, { method: 'POST' }),
+  startPredictions: (modelSlug?: string) =>
+    fetchJSON<TaskStarted>(`/api/tasks/predict${modelSlug ? `?model_slug=${modelSlug}` : ''}`, { method: 'POST' }),
   cancelTask: (taskId: string) =>
     fetchJSON<{ status: string }>(`/api/tasks/${taskId}`, { method: 'DELETE' }),
 
@@ -44,4 +44,18 @@ export const api = {
   getPlacedIds: () => fetchJSON<PlacedBetRef[]>('/api/bets/placed-ids'),
   cancelBet: (id: number) =>
     fetchJSON<{ status: string }>(`/api/bets/${id}`, { method: 'DELETE' }),
+
+  // Models
+  getModels: () => fetchJSON<ModelInfo[]>('/api/models'),
+  getActiveModel: () => fetchJSON<{ slug: string }>('/api/models/active'),
+  setActiveModel: (slug: string) =>
+    fetchJSON<{ slug: string }>(`/api/models/active?slug=${slug}`, { method: 'PUT' }),
+  createModel: (data: { name: string; strategies: string[]; years?: number | null }) =>
+    fetchJSON<ModelInfo>('/api/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }),
+  deleteModel: (slug: string) =>
+    fetchJSON<{ status: string }>(`/api/models/${slug}`, { method: 'DELETE' }),
 }

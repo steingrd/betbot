@@ -115,30 +115,44 @@ class DailyPicksFinder:
         self.value_finder = ValueBetFinder(min_edge, min_odds, max_odds)
         self._strategies: list = []
 
-    def load_model(self) -> bool:
-        """Load all trained strategy models and historical data."""
+    def load_model(self, model_slug: str = "standard") -> bool:
+        """Load trained strategy models and historical data.
+
+        Args:
+            model_slug: Which model to load (default "standard").
+        """
         try:
             from pathlib import Path
 
             from src.features.feature_engineering import FeatureEngineer
-            from src.strategies import STRATEGIES
+            from src.models.model_config import ModelConfig
+            from src.strategies import STRATEGIES, get_strategies
 
             self.matches_df = self.processor.load_matches()
             self.matches_with_league = self.processor.load_matches_with_league()
             self.seasons_df = self.processor.load_seasons()
             self.engineer = FeatureEngineer(self.matches_df)
 
-            # Load all strategies
             models_dir = Path(__file__).parent.parent.parent / "models"
+            model_dir = models_dir / model_slug
+
+            # Load model config to know which strategies to load
+            config_path = model_dir / "config.json"
+            if config_path.exists():
+                config = ModelConfig.load(config_path)
+                strategies = get_strategies(config.strategies)
+            else:
+                strategies = list(STRATEGIES)
+
             self._strategies = []
-            for strategy in STRATEGIES:
+            for strategy in strategies:
                 ext = "json" if strategy.slug in ("poisson", "elo") else "pkl"
-                model_path = models_dir / f"{strategy.slug}.{ext}"
+                model_path = model_dir / f"{strategy.slug}.{ext}"
                 if strategy.load(model_path):
                     self._strategies.append(strategy)
                     logger.info("Loaded strategy: %s", strategy.name)
 
-            logger.info("Loaded %d/%d strategies", len(self._strategies), len(STRATEGIES))
+            logger.info("Loaded %d/%d strategies from %s", len(self._strategies), len(strategies), model_slug)
             return len(self._strategies) > 0
         except Exception as e:
             raise RuntimeError(f"Could not load models: {e}") from e

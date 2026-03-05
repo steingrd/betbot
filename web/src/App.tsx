@@ -13,7 +13,9 @@ import { StatusMetricsRow } from '@/components/dashboard/StatusMetricsRow'
 import { ActionButtons, TaskProgressBar } from '@/components/dashboard/ActionsBar'
 import { PredictionsTabs } from '@/components/predictions/PredictionsTabs'
 import { BetModal } from '@/components/bets/BetModal'
+import { ModelSelector } from '@/components/models/ModelSelector'
 import { useChat } from '@/hooks/useChat'
+import { useModels } from '@/hooks/useModels'
 import { useTaskStream } from '@/hooks/useTaskStream'
 import { useDataStatus } from '@/hooks/useDataStatus'
 import { useResults } from '@/hooks/useResults'
@@ -35,6 +37,7 @@ let logId = 0
 function App() {
   const chat = useChat()
   const task = useTaskStream()
+  const { models, activeSlug, setActive, createModel, deleteModel, refresh: refreshModels } = useModels()
   const { status, loading: statusLoading, refresh: refreshStatus } = useDataStatus()
   const { results, loading: resultsLoading, refresh: refreshResults } = useResults()
   const {
@@ -75,23 +78,23 @@ function App() {
 
   const handleTrain = useCallback(async () => {
     try {
-      const result = await api.startTraining()
-      addLog('Starter trening...', 'info')
+      const result = await api.startTraining(activeSlug)
+      addLog(`Starter trening (${activeSlug})...`, 'info')
       task.startStream(result.task_id, result.task_type)
     } catch (e) {
       addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
     }
-  }, [task, addLog])
+  }, [task, addLog, activeSlug])
 
   const handlePredict = useCallback(async () => {
     try {
-      const result = await api.startPredictions()
+      const result = await api.startPredictions(activeSlug)
       addLog('Starter predictions...', 'info')
       task.startStream(result.task_id, result.task_type)
     } catch (e) {
       addLog(`Feil: ${e instanceof Error ? e.message : 'ukjent feil'}`, 'error')
     }
-  }, [task, addLog])
+  }, [task, addLog, activeSlug])
 
   const handleCancel = useCallback(async () => {
     if (task.taskId) {
@@ -113,6 +116,7 @@ function App() {
     refreshResults()
     refreshPredictions()
     refreshBets()
+    refreshModels()
 
     if (task.type === 'download' && task.result) {
       const r = task.result as { ok: number; skipped: number; matches: number; failed: number }
@@ -158,6 +162,13 @@ function App() {
             className={`h-2 w-2 ${chat.connected ? 'fill-green-500 text-green-500' : 'fill-red-500 text-red-500'}`}
           />
           <div className="flex-1" />
+          <ModelSelector
+            models={models}
+            activeSlug={activeSlug}
+            onSelect={setActive}
+            onCreate={createModel}
+            onDelete={deleteModel}
+          />
           <ActionButtons
             taskId={task.taskId}
             taskType={task.type}

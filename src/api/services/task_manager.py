@@ -55,11 +55,11 @@ class TaskManager:
     def start_download(self, full: bool = False) -> str:
         return self._start_task(TaskType.DOWNLOAD, full=full)
 
-    def start_training(self) -> str:
-        return self._start_task(TaskType.TRAIN)
+    def start_training(self, model_slug: str | None = None) -> str:
+        return self._start_task(TaskType.TRAIN, model_slug=model_slug)
 
-    def start_predictions(self) -> str:
-        return self._start_task(TaskType.PREDICT)
+    def start_predictions(self, model_slug: str | None = None) -> str:
+        return self._start_task(TaskType.PREDICT, model_slug=model_slug)
 
     def _start_task(self, task_type: TaskType, **kwargs) -> str:
         with self._lock:
@@ -119,9 +119,18 @@ class TaskManager:
             if task_type == TaskType.DOWNLOAD:
                 run_download(on_progress=on_progress, is_cancelled=is_cancelled, full=kwargs.get("full", False))
             elif task_type == TaskType.TRAIN:
-                run_training(on_progress=on_progress, is_cancelled=is_cancelled)
+                model_config = None
+                model_slug = kwargs.get("model_slug")
+                if model_slug:
+                    from pathlib import Path
+                    from src.models.model_config import ModelConfig
+                    config_path = Path(__file__).parent.parent.parent.parent / "models" / model_slug / "config.json"
+                    if config_path.exists():
+                        model_config = ModelConfig.load(config_path)
+                run_training(on_progress=on_progress, is_cancelled=is_cancelled, model_config=model_config)
             elif task_type == TaskType.PREDICT:
-                run_predictions(on_progress=on_progress, is_cancelled=is_cancelled)
+                slug = kwargs.get("model_slug") or "standard"
+                run_predictions(on_progress=on_progress, is_cancelled=is_cancelled, model_slug=slug)
         except Exception as e:
             self.broadcast(TaskEvent(event_type="error", data={"message": str(e)}))
         finally:

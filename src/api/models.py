@@ -107,6 +107,7 @@ class BetInput(BaseModel):
     model_prob: float | None = None
     edge: float | None = None
     consensus_count: int | None = None
+    model_slug: str | None = None
     legs: list["AccumulatorLegInput"] | None = None
 
 
@@ -145,6 +146,7 @@ class BetRecord(BaseModel):
     model_prob: float | None
     edge: float | None
     consensus_count: int | None
+    model_slug: str | None = None
     status: str
     payout: float | None
     profit: float | None

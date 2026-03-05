@@ -36,6 +36,7 @@ class BetRepository:
                 model_prob REAL,
                 edge REAL,
                 consensus_count INTEGER,
+                model_slug TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 payout REAL,
                 profit REAL,
@@ -43,6 +44,11 @@ class BetRepository:
                 created_at TEXT NOT NULL
             )
         """)
+        # Migration: add model_slug column if missing
+        try:
+            conn.execute("SELECT model_slug FROM placed_bets LIMIT 1")
+        except sqlite3.OperationalError:
+            conn.execute("ALTER TABLE placed_bets ADD COLUMN model_slug TEXT")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS accumulator_legs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,8 +71,8 @@ class BetRepository:
         cursor = conn.execute("""
             INSERT INTO placed_bets
                 (match_id, bet_type, market, home_team, away_team, kickoff, league,
-                 odds, amount, model_prob, edge, consensus_count, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                 odds, amount, model_prob, edge, consensus_count, model_slug, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """, (
             bet.get("match_id"),
             bet.get("bet_type", "single"),
@@ -80,6 +86,7 @@ class BetRepository:
             bet.get("model_prob"),
             bet.get("edge"),
             bet.get("consensus_count"),
+            bet.get("model_slug"),
             now,
         ))
         bet_id = cursor.lastrowid
@@ -93,8 +100,8 @@ class BetRepository:
         cursor = conn.execute("""
             INSERT INTO placed_bets
                 (match_id, bet_type, market, home_team, away_team, kickoff, league,
-                 odds, amount, model_prob, edge, consensus_count, status, created_at)
-            VALUES (?, 'accumulator', NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                 odds, amount, model_prob, edge, consensus_count, model_slug, status, created_at)
+            VALUES (?, 'accumulator', NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """, (
             None,
             bet.get("kickoff"),
@@ -104,6 +111,7 @@ class BetRepository:
             bet.get("model_prob"),
             bet.get("edge"),
             bet.get("consensus_count"),
+            bet.get("model_slug"),
             now,
         ))
         bet_id = cursor.lastrowid
