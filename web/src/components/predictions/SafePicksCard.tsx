@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/tooltip'
 import { Layers } from 'lucide-react'
 import type { Accumulator, PlacedBetRef, SafePick } from '@/types'
+import { translateMarket } from '@/lib/utils'
 
 interface Props {
   safePicks: SafePick[]
@@ -111,7 +112,7 @@ export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _pl
                           {p.home_team} vs {p.away_team}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                        <TableCell className="text-xs font-medium">{p.predicted_outcome}</TableCell>
+                        <TableCell className="text-xs font-medium">{translateMarket(p.predicted_outcome)}</TableCell>
                         <TableCell className="text-right text-xs font-mono text-muted-foreground">
                           {p.odds != null ? p.odds.toFixed(2) : '-'}
                         </TableCell>

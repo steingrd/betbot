@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/tooltip'
 import { Target } from 'lucide-react'
 import type { ConfidentGoalPick } from '@/types'
+import { translateMarket } from '@/lib/utils'
 
 interface Props {
   confidentGoals: ConfidentGoalPick[]
@@ -82,7 +83,7 @@ export function ConfidentGoalsCard({ confidentGoals, loading }: Props) {
                           {p.home_team} vs {p.away_team}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                        <TableCell className="text-xs font-medium">{p.market}</TableCell>
+                        <TableCell className="text-xs font-medium">{translateMarket(p.market)}</TableCell>
                         <TableCell className={`text-right text-xs font-medium ${probColor(p.avg_prob)}`}>
                           {(p.avg_prob * 100).toFixed(1)}%
                         </TableCell>

@@ -14,6 +14,7 @@ import {
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { ChevronDown, ChevronRight, Receipt, X } from 'lucide-react'
 import type { BetRecord } from '@/types'
+import { translateMarket } from '@/lib/utils'
 
 interface Props {
   bets: BetRecord[]
@@ -157,7 +158,7 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
                             : `${bet.home_team} vs ${bet.away_team}`}
                         </TableCell>
                         <TableCell className="text-xs font-medium">
-                          {bet.bet_type === 'accumulator' ? '-' : bet.market}
+                          {bet.bet_type === 'accumulator' ? '-' : translateMarket(bet.market)}
                         </TableCell>
                         <TableCell className="text-right text-xs font-mono">
                           {bet.odds.toFixed(2)}
@@ -197,7 +198,7 @@ export function CouponsCard({ bets, loading, onCancel }: Props) {
                           <TableCell className="text-xs text-muted-foreground">
                             {leg.home_team} vs {leg.away_team}
                           </TableCell>
-                          <TableCell className="text-xs">{leg.market}</TableCell>
+                          <TableCell className="text-xs">{translateMarket(leg.market)}</TableCell>
                           <TableCell className="text-right text-xs font-mono text-muted-foreground">
                             {leg.odds?.toFixed(2) ?? '-'}
                           </TableCell>

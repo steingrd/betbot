@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import type { Accumulator, BetInput, Prediction } from '@/types'
+import { translateMarket } from '@/lib/utils'
 
 interface BetModalProps {
   open: boolean
@@ -111,7 +112,7 @@ export function BetModal({ open, onOpenChange, onPlace, prediction, accumulator 
                 {prediction.home_team} vs {prediction.away_team}
               </p>
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">{prediction.market}</Badge>
+                <Badge variant="secondary" className="text-xs">{translateMarket(prediction.market)}</Badge>
                 <span className="text-xs text-muted-foreground">{prediction.league}</span>
                 <span className="text-xs text-muted-foreground">{prediction.kickoff}</span>
               </div>
@@ -125,7 +126,7 @@ export function BetModal({ open, onOpenChange, onPlace, prediction, accumulator 
                 {accumulator.picks.map((p, i) => (
                   <div key={i} className="flex justify-between text-muted-foreground">
                     <span>{p.home_team} vs {p.away_team}</span>
-                    <span className="font-medium text-foreground">{p.predicted_outcome}</span>
+                    <span className="font-medium text-foreground">{translateMarket(p.predicted_outcome)}</span>
                   </div>
                 ))}
               </div>

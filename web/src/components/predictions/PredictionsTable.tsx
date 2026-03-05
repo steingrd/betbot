@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import type { PlacedBetRef, Prediction } from '@/types'
+import { translateMarket } from '@/lib/utils'
 
 interface Props {
   predictions: Prediction[]
@@ -81,7 +82,7 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
                   {p.home_team} vs {p.away_team}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">{p.league}</TableCell>
-                <TableCell className="text-xs font-medium">{p.market}</TableCell>
+                <TableCell className="text-xs font-medium">{translateMarket(p.market)}</TableCell>
                 <TableCell className="text-right text-xs font-mono text-muted-foreground">
                   {fmtOdds(p.odds_home)}
                 </TableCell>
