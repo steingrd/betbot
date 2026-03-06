@@ -292,14 +292,24 @@ class BetRepository:
         return self._evaluate_market(bet["market"], match)
 
     def _find_match_by_teams(self, conn: sqlite3.Connection, bet: dict) -> Optional[dict]:
-        """Try to find match by team names."""
+        """Try to find match by team names, filtered by kickoff date."""
         if not bet.get("home_team") or not bet.get("away_team"):
             return None
-        row = conn.execute("""
-            SELECT result, total_goals, btts FROM matches
-            WHERE home_team = ? AND away_team = ?
-            ORDER BY date_unix DESC LIMIT 1
-        """, (bet["home_team"], bet["away_team"])).fetchone()
+        kickoff = bet.get("kickoff")
+        if kickoff:
+            # Only match games within ±2 days of the bet's kickoff
+            row = conn.execute("""
+                SELECT result, total_goals, btts FROM matches
+                WHERE home_team = ? AND away_team = ?
+                  AND date(datetime(date_unix, 'unixepoch')) BETWEEN date(?, '-2 days') AND date(?, '+2 days')
+                ORDER BY date_unix DESC LIMIT 1
+            """, (bet["home_team"], bet["away_team"], kickoff, kickoff)).fetchone()
+        else:
+            row = conn.execute("""
+                SELECT result, total_goals, btts FROM matches
+                WHERE home_team = ? AND away_team = ?
+                ORDER BY date_unix DESC LIMIT 1
+            """, (bet["home_team"], bet["away_team"])).fetchone()
         return row
 
     def _check_accumulator(self, conn: sqlite3.Connection, bet: dict) -> Optional[bool]:
@@ -325,11 +335,20 @@ class BetRepository:
             ).fetchone()
 
             if not match:
-                match = conn.execute("""
-                    SELECT result, total_goals, btts FROM matches
-                    WHERE home_team = ? AND away_team = ?
-                    ORDER BY date_unix DESC LIMIT 1
-                """, (leg["home_team"], leg["away_team"])).fetchone()
+                kickoff = leg.get("kickoff")
+                if kickoff:
+                    match = conn.execute("""
+                        SELECT result, total_goals, btts FROM matches
+                        WHERE home_team = ? AND away_team = ?
+                          AND date(datetime(date_unix, 'unixepoch')) BETWEEN date(?, '-2 days') AND date(?, '+2 days')
+                        ORDER BY date_unix DESC LIMIT 1
+                    """, (leg["home_team"], leg["away_team"], kickoff, kickoff)).fetchone()
+                else:
+                    match = conn.execute("""
+                        SELECT result, total_goals, btts FROM matches
+                        WHERE home_team = ? AND away_team = ?
+                        ORDER BY date_unix DESC LIMIT 1
+                    """, (leg["home_team"], leg["away_team"])).fetchone()
 
             if not match or dict(match)["result"] is None:
                 all_decided = False
