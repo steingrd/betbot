@@ -299,8 +299,8 @@ class BetRepository:
         """
         if not bet.get("home_team") or not bet.get("away_team"):
             return None
-        home_pattern = f'{bet["home_team"]}%'
-        away_pattern = f'{bet["away_team"]}%'
+        home_pattern = f'%{bet["home_team"]}%'
+        away_pattern = f'%{bet["away_team"]}%'
         kickoff = bet.get("kickoff")
         if kickoff:
             # Only match games within ±2 days of the bet's kickoff
