@@ -137,6 +137,11 @@ class NorskTippingClient:
 
     BASE_URL = "https://api.norsk-tipping.no"
 
+    # Ligaer som finnes i API-et men ikke i Norsk Tipping-appen
+    EXCLUDED_LEAGUES = {
+        "NOR NM, menn",
+    }
+
     def __init__(self, cache_dir: Optional[Path] = None):
         self.session = requests.Session()
         self.session.headers.update({
@@ -300,6 +305,10 @@ class NorskTippingClient:
                     # Hent liga
                     arrangement = match_data.get("arrangement", {})
                     league = arrangement.get("name", "Unknown")
+
+                    # Hopp over ligaer som ikke finnes i appen
+                    if league in self.EXCLUDED_LEAGUES:
+                        continue
 
                     match = NorskTippingMatch(
                         match_id=str(match_data.get("gameEngineEventId", f"tipping_{idx}")),
