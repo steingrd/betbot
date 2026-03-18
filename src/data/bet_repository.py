@@ -294,8 +294,9 @@ class BetRepository:
     def _find_match_by_teams(self, conn: sqlite3.Connection, bet: dict) -> Optional[dict]:
         """Try to find match by team names, filtered by kickoff date.
 
-        Uses LIKE matching so that short names (e.g. 'Newcastle') match full
-        names in the database (e.g. 'Newcastle United').
+        Uses bidirectional LIKE matching so both short-to-long (e.g. 'Newcastle'
+        matches 'Newcastle United') and long-to-short (e.g. 'KFUM Oslo' matches
+        'KFUM') work correctly.
         """
         if not bet.get("home_team") or not bet.get("away_team"):
             return None
@@ -306,16 +307,18 @@ class BetRepository:
             # Only match games within ±2 days of the bet's kickoff
             row = conn.execute("""
                 SELECT result, total_goals, btts FROM matches
-                WHERE home_team LIKE ? AND away_team LIKE ?
+                WHERE (home_team LIKE ? OR ? LIKE '%' || home_team || '%')
+                  AND (away_team LIKE ? OR ? LIKE '%' || away_team || '%')
                   AND date(datetime(date_unix, 'unixepoch')) BETWEEN date(?, '-2 days') AND date(?, '+2 days')
                 ORDER BY date_unix DESC LIMIT 1
-            """, (home_pattern, away_pattern, kickoff, kickoff)).fetchone()
+            """, (home_pattern, bet["home_team"], away_pattern, bet["away_team"], kickoff, kickoff)).fetchone()
         else:
             row = conn.execute("""
                 SELECT result, total_goals, btts FROM matches
-                WHERE home_team LIKE ? AND away_team LIKE ?
+                WHERE (home_team LIKE ? OR ? LIKE '%' || home_team || '%')
+                  AND (away_team LIKE ? OR ? LIKE '%' || away_team || '%')
                 ORDER BY date_unix DESC LIMIT 1
-            """, (home_pattern, away_pattern)).fetchone()
+            """, (home_pattern, bet["home_team"], away_pattern, bet["away_team"])).fetchone()
         return row
 
     def _check_accumulator(self, conn: sqlite3.Connection, bet: dict) -> Optional[bool]:
