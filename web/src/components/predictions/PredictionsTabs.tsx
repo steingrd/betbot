@@ -1,3 +1,4 @@
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PredictionsCard } from './PredictionsCard'
 import { SafePicksCard } from './SafePicksCard'
@@ -5,6 +6,18 @@ import { ConfidentGoalsCard } from './ConfidentGoalsCard'
 import { ResultsCard } from '@/components/dashboard/ResultsCard'
 import { CouponsCard } from '@/components/bets/CouponsCard'
 import type { Accumulator, BetRecord, ConfidentGoalPick, MatchResult, PlacedBetRef, Prediction, SafePick } from '@/types'
+
+const TAB_ROUTES: Record<string, string> = {
+  '/': 'value-bets',
+  '/kombispill': 'kombispill',
+  '/btts': 'btts',
+  '/kuponger': 'kuponger',
+  '/resultater': 'resultater',
+}
+
+const ROUTE_FOR_TAB: Record<string, string> = Object.fromEntries(
+  Object.entries(TAB_ROUTES).map(([path, tab]) => [tab, path])
+)
 
 interface Props {
   predictions: Prediction[]
@@ -37,8 +50,12 @@ export function PredictionsTabs({
   onAccumulatorClick,
   onCancelBet,
 }: Props) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeTab = TAB_ROUTES[location.pathname] ?? 'value-bets'
+
   return (
-    <Tabs defaultValue="value-bets">
+    <Tabs value={activeTab} onValueChange={(tab) => navigate(ROUTE_FOR_TAB[tab] ?? '/')}>
       <TabsList>
         <TabsTrigger value="value-bets">Value Bets</TabsTrigger>
         <TabsTrigger value="kombispill">Kombispill</TabsTrigger>
