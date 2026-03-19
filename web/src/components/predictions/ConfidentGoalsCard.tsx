@@ -77,7 +77,7 @@ export function ConfidentGoalsCard({ confidentGoals, loading }: Props) {
                   </TableHeader>
                   <TableBody>
                     {confidentGoals.map((p, i) => (
-                      <TableRow key={i}>
+                      <TableRow key={i} className={p.avg_prob >= 0.6 ? 'bg-amber-500/10' : ''}>
                         <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {p.home_team} vs {p.away_team}

@@ -112,7 +112,7 @@ export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _pl
                   </TableHeader>
                   <TableBody>
                     {(selectedAccumulator?.picks || safePicks).map((p, i) => (
-                      <TableRow key={i} className={selectedAccumulator && i < selectedAccumulator.size ? '' : 'opacity-50'}>
+                      <TableRow key={i} className={`${selectedAccumulator && i < selectedAccumulator.size ? '' : 'opacity-50'} ${p.avg_prob >= 0.6 ? 'bg-amber-500/10' : ''}`}>
                         <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {p.home_team} vs {p.away_team}

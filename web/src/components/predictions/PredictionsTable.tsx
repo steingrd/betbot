@@ -74,7 +74,7 @@ export function PredictionsTable({ predictions, placedIds = [], onRowClick }: Pr
             {predictions.map((p, i) => (
               <TableRow
                 key={i}
-                className={`${onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isPlaced(p, placedIds) ? 'bg-green-500/10' : ''}`}
+                className={`${onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''} ${isPlaced(p, placedIds) ? 'bg-green-500/10' : p.model_prob != null && p.model_prob >= 0.6 ? 'bg-amber-500/10' : ''}`}
                 onClick={() => onRowClick?.(p)}
               >
                 <TableCell className="font-mono whitespace-nowrap">{p.kickoff}</TableCell>
