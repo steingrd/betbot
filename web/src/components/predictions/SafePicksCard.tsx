@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
@@ -32,6 +32,12 @@ interface Props {
 export function SafePicksCard({ safePicks, accumulators, loading, placedIds: _placedIds, onAccumulatorClick }: Props) {
   const availableSizes = accumulators.map((a) => String(a.size))
   const [selectedSize, setSelectedSize] = useState<string>(availableSizes[0] || '4')
+
+  useEffect(() => {
+    if (availableSizes.length > 0 && !availableSizes.includes(selectedSize)) {
+      setSelectedSize(availableSizes[0])
+    }
+  }, [availableSizes.join(',')])
 
   const selectedAccumulator = accumulators.find((a) => String(a.size) === selectedSize)
 
