@@ -50,6 +50,11 @@ Thumbs.db
 # Claude Code
 .claude/
 
+# Beads runtime files
+.beads/*.pid
+.beads/*.port
+.beads/*.activity
+
 # Dolt database files (added by bd init)
 .dolt/
 *.db
